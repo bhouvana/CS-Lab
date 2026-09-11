@@ -39,6 +39,9 @@ class Instruction:
             self.dest = operands[0]
             match = re.match(r"-?\d+\((R\d+)\)", operands[1])
             self.srcs = [match.group(1) if match else operands[1]]
+        elif self.opcode in ("BEQ", "BNE"):
+            self.dest = None
+            self.srcs = operands[:2]
         else:
             # ADD/SUB/MUL Rd, Rs1, Rs2
             self.dest = operands[0]
@@ -66,6 +69,8 @@ def _ready_cycle(instructions, i, ex, mem, wb, forwarding):
             continue
         if not forwarding:
             ready = wb[producer] + 1
+        elif forwarding == "memwb":
+            ready = wb[producer] + 1
         elif instructions[producer].opcode == "LOAD":
             # Load-use hazard: even with forwarding, a LOAD's value
             # isn't available until after its MEM stage, not its EX
@@ -88,6 +93,12 @@ def simulate(instructions, forwarding):
 
     for i in range(n):
         IF[i] = 1 if i == 0 else ID[i - 1]  # IF frees up once i-1 enters ID
+        for branch in range(i):
+            if instructions[branch].opcode in ("BEQ", "BNE"):
+                # Resolve branches in EX and hold younger fetches until
+                # the outcome is known. This models a stall-on-branch
+                # policy without speculative fetch or a flush path.
+                IF[i] = max(IF[i], EX[branch] + 1)
         ID[i] = max(IF[i] + 1, (EX[i - 1] if i > 0 else 1))  # ID frees up once i-1 enters EX
         hazard_ready = _ready_cycle(instructions, i, EX, MEM, WB, forwarding)
         EX[i] = max(ID[i] + 1, (MEM[i - 1] if i > 0 else 1), hazard_ready)

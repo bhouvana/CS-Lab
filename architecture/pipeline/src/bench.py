@@ -53,6 +53,33 @@ def report(label, instrs):
           f"{s_no_fwd['cpi']:<14.2f}{s_fwd['cpi']:<12.2f}{reduction:.1f}%")
 
 
+def simulate_two_issue(instrs):
+    ready = {}
+    next_instruction = 0
+    cycle = 1
+    while next_instruction < len(instrs):
+        issued = 0
+        while issued < 2 and next_instruction < len(instrs):
+            instr = instrs[next_instruction]
+            if any(ready.get(src, 0) > cycle for src in instr.srcs):
+                break
+            latency = 2 if instr.opcode == "LOAD" else 1
+            if instr.dest:
+                ready[instr.dest] = cycle + latency
+            next_instruction += 1
+            issued += 1
+        cycle += 1
+    return cycle + 3
+
+
+def report_superscalar(label, instrs):
+    single = stats(instrs, *simulate(instrs, forwarding=True))
+    dual_cycles = simulate_two_issue(instrs)
+    ideal = len(instrs) + 4
+    print(f"{label:<24}{single['cycles']:<16}{dual_cycles:<14}{single['cpi']:<14.2f}"
+          f"{dual_cycles / len(instrs):.2f}")
+
+
 def main():
     n = 50
     print("Benchmark: forwarding's effect on stalls, by hazard density\n")
@@ -62,6 +89,27 @@ def main():
     report("mixed (1-in-2)", make_mixed_chain(n, 2))
     report("dependent chain (100%)", make_dependent_chain(n))
     report("load-use pairs", make_load_use_chain(n))
+
+    if True:
+        branch_trace = [Instruction("BEQ R1, R2, target"), Instruction("ADD R3, R4, R5")]
+        branch_stages, branch_cycles = simulate(branch_trace, forwarding=True)
+        branch_stalls = stats(branch_trace, branch_stages, branch_cycles)["stalls"]
+        print(f"\nExperiment 1: stall-on-branch control hazard\n\n"
+                    f"branch EX cycle: {branch_stages[0]['EX']}  younger IF cycle: {branch_stages[1]['IF']}  "
+                    f"cycles: {branch_cycles}  stalls: {branch_stalls}\n")
+
+    print("\nExperiment 2: two-issue in-order pipeline versus single issue\n")
+    print(f"{'pattern':<24}{'single cycles':<16}{'dual cycles':<14}{'single CPI':<14}dual CPI")
+    report_superscalar("independent (0%)", make_independent_chain(n))
+    report_superscalar("dependent chain (100%)", make_dependent_chain(n))
+    report_superscalar("load-use pairs", make_load_use_chain(n))
+
+    print("\nExperiment 3: forwarding path ablation\n")
+    print(f"{'pattern':<24}{'full stalls':<16}{'MEM/WB stalls':<16}regression")
+    for label, instrs in [("dependent chain", make_dependent_chain(n)), ("load-use pairs", make_load_use_chain(n))]:
+        full = stats(instrs, *simulate(instrs, forwarding=True))
+        memwb = stats(instrs, *simulate(instrs, forwarding="memwb"))
+        print(f"{label:<24}{full['stalls']:<16}{memwb['stalls']:<16}{memwb['stalls'] - full['stalls']}")
     return 0
 
 

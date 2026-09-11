@@ -71,6 +71,15 @@ def test_load_instruction_parses_base_register():
     print("ok: LOAD Rd, offset(Rs) parses the base register as the only source")
 
 
+def test_branch_stalls_younger_fetch_until_ex():
+    instrs = parse_program(["BEQ R1, R2, target", "ADD R3, R4, R5"])
+    stage_start, total_cycles = simulate(instrs, forwarding=True)
+    assert stage_start[0]["EX"] == 3
+    assert stage_start[1]["IF"] == 4
+    assert stats(instrs, stage_start, total_cycles)["stalls"] == 2
+    print("ok: branch resolution in EX delays younger fetch")
+
+
 def test_comment_and_blank_lines_ignored_invalid_case():
     instrs = parse_program(["# a comment", "", "ADD R1, R2, R3", "   "])
     assert len(instrs) == 1
@@ -86,5 +95,6 @@ if __name__ == "__main__":
     test_single_instruction_edge_case()
     test_empty_program_edge_case()
     test_load_instruction_parses_base_register()
+    test_branch_stalls_younger_fetch_until_ex()
     test_comment_and_blank_lines_ignored_invalid_case()
     print("all tests passed")

@@ -69,7 +69,8 @@ LOAD       F D E M W
 - `src/pipeline.py` — `Instruction` (parses `ADD Rd, Rs1, Rs2` /
   `LOAD Rd, offset(Rs)`), `simulate()` (the core algorithm), cycle
   table formatting, and the CLI.
-- `src/bench.py` — the forwarding-vs-hazard-density experiment.
+- `src/bench.py` — the forwarding, control-hazard, superscalar, and
+  forwarding-path experiments.
 - `tests/test_pipeline.py` — 9 tests, including the exact stall counts
   for a zero-hazard program, an ALU RAW hazard with/without forwarding,
   and the load-use hazard.
@@ -121,6 +122,32 @@ dependent chain (100%)  98              0             3.04          1.08        
 load-use pairs          50              25            2.08          1.58        50.0%
 ```
 
+**1. Stall-on-branch control hazard.** A `BEQ` resolves in EX and holds
+younger fetch until that cycle:
+
+```text
+branch EX cycle: 3  younger IF cycle: 4  cycles: 8  stalls: 2
+```
+
+**2. Two-issue in-order pipeline.** The benchmark compares the existing
+single-issue forwarding model with a two-issue scheduler:
+
+```text
+pattern                 single cycles   dual cycles   single CPI    dual CPI
+independent (0%)        54              29            1.08          0.58
+dependent chain (100%)  54              54            1.08          1.08
+load-use pairs          79              55            1.58          1.10
+```
+
+**3. Forwarding-path ablation.** Removing EX/MEM forwarding and keeping
+only MEM/WB forwarding gives the following additional stalls:
+
+```text
+pattern                 full stalls     MEM/WB stalls   regression
+dependent chain         0               98              98
+load-use pairs          25              50              25
+```
+
 ## Results
 
 Forwarding eliminates **100% of ALU-to-ALU RAW hazard stalls**,
@@ -147,6 +174,12 @@ spacing between consecutive instructions is exactly one cycle, an
 arbitrarily long chain of back-to-back ALU dependencies needs zero
 extra stalls. Density stops mattering once the timing lines up exactly.
 
+The branch model makes the control cost explicit: resolving in EX delays
+the next fetch and adds two end-to-end stall cycles to the two-instruction
+trace. Two-issue helps independent instructions but cannot accelerate a
+dependency chain. Removing EX/MEM forwarding adds 98 stalls to the ALU
+chain and 25 to load-use pairs, confirming that bypass path's role.
+
 ## Limitations
 
 - **WAR and WAW hazards are not just unimplemented — they cannot occur
@@ -162,17 +195,8 @@ extra stalls. Density stops mattering once the timing lines up exactly.
   functional unit) aren't modeled — every stage is assumed to always
   be available once an instruction is ready to enter it (subject only
   to the one-instruction-per-stage constraint already enforced).
-- No branches — this simulator only models data hazards, not control
-  hazards (that's `architecture/branch-predictor`'s job).
+- The branch, two-issue, and MEM/WB-only models are benchmark-focused;
+  the core remains a compact single-issue timing model.
 - This is a simulator, not RTL — no register file, no ALU, no memory
   actually modeled, only cycle timing.
 
-## Further experiments
-
-- Add branch instructions and a simple "stall until resolved" control
-  hazard, then compare against `architecture/branch-predictor`'s
-  predictors feeding speculative fetch instead of stalling.
-- Model a superscalar (2-issue) pipeline and see how much more
-  complex hazard detection becomes with two instructions per stage.
-- Add a second forwarding path (MEM/WB only, no EX/MEM) and measure
-  how much stall count regresses compared to full forwarding.
