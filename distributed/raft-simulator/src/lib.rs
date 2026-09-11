@@ -145,9 +145,7 @@ impl Cluster {
     /// Restores all simulated network links.
     pub fn heal_partition(&mut self) {
         for row in &mut self.links {
-            for link in row {
-                *link = true;
-            }
+            row.fill(true);
         }
     }
 
