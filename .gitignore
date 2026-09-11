@@ -14,6 +14,64 @@ target/
 
 *.tmp
 
+# Linux/WSL builds produce extensionless binaries (unlike MinGW, which
+# appends .exe): *.exe/*.out above doesn't catch them. Named explicitly,
+# generated from each lab's own Makefile `clean:` target.
+/algorithms/graph-algorithms/graph
+/algorithms/graph-algorithms/graph_test
+/algorithms/graph-algorithms/graph_bench
+/algorithms/sat-solver/sat
+/algorithms/sat-solver/sat_test
+/algorithms/sat-solver/sat_test_asan
+/algorithms/sat-solver/sat_bench
+/architecture/branch-predictor/branch
+/architecture/branch-predictor/branch_test
+/architecture/branch-predictor/branch_bench
+/architecture/cache/cache
+/architecture/cache/cache_test
+/architecture/cache/cache_bench
+/assembly/calling-convention/demo
+/assembly/calling-convention/demo_test
+/assembly/calling-convention/demo_bench
+/assembly/stack-frames/nested
+/assembly/syscall-demo/demo
+/assembly/syscall-demo/demo_test
+/assembly/syscall-demo/demo_bench
+/assembly/syscall-demo/hello_nolibc
+/compilers/bytecode-vm/vm
+/compilers/bytecode-vm/vm_test
+/compilers/bytecode-vm/vm_test_asan
+/compilers/bytecode-vm/vm_bench
+/compression/huffman/huffman
+/compression/huffman/huffman_test
+/compression/huffman/huffman_test_asan
+/compression/huffman/huffman_bench
+/compression/lz77/lz77
+/compression/lz77/lz77_test
+/compression/lz77/lz77_test_asan
+/compression/lz77/lz77_bench
+/crypto/sha256/sha256
+/crypto/sha256/sha256_test
+/crypto/sha256/sha256_test_asan
+/crypto/sha256/sha256_bench
+/networking/tcp-chat/server
+/networking/tcp-chat/client
+/networking/tcp-chat/chat_test
+/networking/tcp-chat/chat_test_asan
+/networking/tcp-chat/chat_bench
+/os/allocator/allocator_demo
+/os/allocator/allocator_test
+/os/allocator/allocator_test_asan
+/os/allocator/allocator_bench
+/runtimes/garbage-collector/gc_demo
+/runtimes/garbage-collector/gc_test
+/runtimes/garbage-collector/gc_test_asan
+/runtimes/garbage-collector/gc_bench
+/security/constant-time/compare_demo
+/security/constant-time/compare_test
+/security/constant-time/compare_test_asan
+/security/constant-time/compare_bench
+
 # Python
 __pycache__/
 *.pyc

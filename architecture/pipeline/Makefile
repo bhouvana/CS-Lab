@@ -1,4 +1,7 @@
-PYTHON := python
+# Debian/Ubuntu (incl. WSL) ship only `python3`; Windows/Git Bash and
+# some distros still only have `python`. Prefer python3, fall back to
+# python, so `make test`/`make benchmark` work unmodified on both.
+PYTHON := $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)
 
 .PHONY: build test benchmark clean
 
