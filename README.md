@@ -90,8 +90,8 @@ cs-lab/
 | Bloom Filter | Rust | Probabilistic data structures | done |
 | Huffman | C | Entropy coding / compression | done |
 | SAT Solver | C++ | Constraint solving / NP-completeness | planned |
-| Tiny Language | Rust | Compilers | planned |
-| Bytecode VM | C | Runtime systems | planned |
+| Tiny Language | Rust | Compilers | done |
+| Bytecode VM | C | Runtime systems | done |
 | LZ77 | C++ | Dictionary compression | planned |
 | SHA-256 | C | Cryptography | planned |
 | Cache Simulator | C++ | Computer architecture / locality | planned |

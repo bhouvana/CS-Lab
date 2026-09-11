@@ -75,6 +75,43 @@ pure overhead. English text and source code land around 76-78%, with
 the fixed header cost weighing more heavily on these small (~1-1.5 KB)
 sample files than it would on a larger corpus.
 
+## Tiny Language / AtlasLang (`compilers/tiny-language`)
+
+**Experiment:** the pipeline-visibility itself — run the same program
+through `tokens`, `ast`, and `run` and confirm each stage's output
+lines up (e.g. `a > b` parses to one `Binary` AST node, not three
+statements). 10/10 tests pass, including a while-loop Fibonacci
+sequence checked against the exact expected values `[0,1,1,2,3,5,8,13]`
+and four invalid-input cases (division by zero, undefined variable,
+assignment without `let`, syntax error).
+
+## Bytecode VM (`compilers/bytecode-vm`)
+
+**Question:** how fast is the fetch/decode/execute loop, and what does
+`--trace` cost?
+
+```text
+Benchmark: raw VM throughput (countdown loop, no trace)
+(each row averaged over enough repeats to exceed 50ms total)
+
+iterations    reps    ms/run      iterations/sec
+100000        26      1.9231      52000000
+1000000       4       12.7500     78431373
+5000000       1       83.0000     60240964
+
+Benchmark: --trace overhead at 100000 iterations
+(output redirected to a file, not the terminal)
+
+no trace:   1.9231 ms/run (26 reps)
+trace:    668.0000 ms/run (1 reps)  -> 347.4x slower
+```
+
+Raw throughput holds around 50-80M instructions/sec regardless of
+scale. `--trace` is over 300x slower at equal iteration count — the
+`fprintf` calls per traced instruction dominate the actual arithmetic
+being traced, a direct measured example of why tracing/logging stays
+off by default in interpreter hot loops.
+
 ---
 
 *(Results for further labs are appended here as they're implemented.)*

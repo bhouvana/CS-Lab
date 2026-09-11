@@ -1,0 +1,13 @@
+[package]
+name = "tiny-language"
+version = "0.1.0"
+edition = "2021"
+description = "AtlasLang: a deliberately tiny language - lexer, parser, AST, tree-walking interpreter."
+
+[lib]
+name = "tiny_language"
+path = "src/lib.rs"
+
+[[bin]]
+name = "atlas"
+path = "src/main.rs"

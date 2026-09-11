@@ -1,0 +1,13 @@
+# prints 5, 4, 3, 2, 1 then halts.
+PUSH 5      # 0:  counter = 5
+STORE 0     # 1
+LOAD 0      # 2:  loop_start: push counter
+JUMP_IF_FALSE 11 # 3: if counter == 0, goto end (11)
+LOAD 0      # 4
+PRINT       # 5
+LOAD 0      # 6
+PUSH 1      # 7
+SUB         # 8:  counter - 1
+STORE 0     # 9:  counter = counter - 1
+JUMP 2      # 10: goto loop_start
+HALT        # 11: end

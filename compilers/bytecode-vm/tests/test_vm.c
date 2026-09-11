@@ -1,0 +1,215 @@
+// Plain assert-based tests, no framework.
+#include "vm.h"
+
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Runs a program with PRINT/trace output captured to a scratch file
+// instead of real stdout, so tests can assert on exact output text.
+// (Not tmpfile(): on Windows it tries to create the file at the drive
+// root and fails without admin rights — a local file is portable.)
+static void run_and_capture(const Program *p, int trace, char *buf, size_t buf_size) {
+    const char *scratch = "tests/tmp_capture.out";
+    FILE *tmp = fopen(scratch, "w+");
+    assert(tmp != NULL);
+    VM vm;
+    vm_init(&vm, p);
+    vm_run(&vm, trace, tmp);
+    rewind(tmp);
+    size_t n = fread(buf, 1, buf_size - 1, tmp);
+    buf[n] = '\0';
+    fclose(tmp);
+    remove(scratch);
+}
+
+static void test_push_add_print_normal_case(void) {
+    Instruction code[] = {
+        {OP_PUSH, 10}, {OP_PUSH, 20}, {OP_ADD, 0}, {OP_PRINT, 0}, {OP_HALT, 0},
+    };
+    Program p = {code, 5};
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "30\n") == 0);
+    printf("ok: push/add/print -> %s", out);
+}
+
+static void test_sub_mul_div_normal_case(void) {
+    // (10 - 3) * 2 / 7 = 2
+    Instruction code[] = {
+        {OP_PUSH, 10}, {OP_PUSH, 3},  {OP_SUB, 0}, {OP_PUSH, 2},
+        {OP_MUL, 0},   {OP_PUSH, 7},  {OP_DIV, 0}, {OP_PRINT, 0}, {OP_HALT, 0},
+    };
+    Program p = {code, 9};
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "2\n") == 0);
+    printf("ok: sub/mul/div -> %s", out);
+}
+
+static void test_load_store_roundtrip(void) {
+    Instruction code[] = {
+        {OP_PUSH, 5}, {OP_STORE, 0}, {OP_LOAD, 0}, {OP_PRINT, 0}, {OP_HALT, 0},
+    };
+    Program p = {code, 5};
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "5\n") == 0);
+    printf("ok: load/store roundtrip -> %s", out);
+}
+
+static void test_unconditional_jump_skips_instructions(void) {
+    // PUSH 1; JUMP 3; PUSH 999 (skipped); PRINT; HALT -> prints 1
+    Instruction code[] = {
+        {OP_PUSH, 1}, {OP_JUMP, 3}, {OP_PUSH, 999}, {OP_PRINT, 0}, {OP_HALT, 0},
+    };
+    Program p = {code, 5};
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "1\n") == 0);
+    printf("ok: unconditional jump -> %s", out);
+}
+
+static void test_jump_if_false_taken(void) {
+    // condition 0 (false) -> jump straight to the "else" push.
+    Instruction code[] = {
+        {OP_PUSH, 0}, {OP_JUMP_IF_FALSE, 4}, {OP_PUSH, 111}, {OP_PRINT, 0},
+        {OP_PUSH, 222}, {OP_PRINT, 0}, {OP_HALT, 0},
+    };
+    Program p = {code, 7};
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "222\n") == 0);
+    printf("ok: jump_if_false taken -> %s", out);
+}
+
+static void test_jump_if_false_not_taken(void) {
+    // condition 1 (true) -> falls through, both PUSHes execute.
+    Instruction code[] = {
+        {OP_PUSH, 1}, {OP_JUMP_IF_FALSE, 4}, {OP_PUSH, 111}, {OP_PRINT, 0},
+        {OP_PUSH, 222}, {OP_PRINT, 0}, {OP_HALT, 0},
+    };
+    Program p = {code, 7};
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "111\n222\n") == 0);
+    printf("ok: jump_if_false not taken -> %s", out);
+}
+
+static void test_countdown_loop_regression(void) {
+    // The exact program in examples/countdown.bytecode: prints 5..1.
+    Instruction code[] = {
+        {OP_PUSH, 5}, {OP_STORE, 0}, {OP_LOAD, 0}, {OP_JUMP_IF_FALSE, 11},
+        {OP_LOAD, 0}, {OP_PRINT, 0}, {OP_LOAD, 0}, {OP_PUSH, 1},
+        {OP_SUB, 0},  {OP_STORE, 0}, {OP_JUMP, 2}, {OP_HALT, 0},
+    };
+    Program p = {code, 12};
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "5\n4\n3\n2\n1\n") == 0);
+    printf("ok: countdown loop -> %s", out);
+}
+
+static void test_division_by_zero_invalid_case(void) {
+    Instruction code[] = {{OP_PUSH, 1}, {OP_PUSH, 0}, {OP_DIV, 0}, {OP_HALT, 0}};
+    Program p = {code, 4};
+    VM vm;
+    vm_init(&vm, &p);
+    assert(vm_run(&vm, 0, stdout) == -1);
+    printf("ok: division by zero rejected\n");
+}
+
+static void test_stack_underflow_invalid_case(void) {
+    Instruction code[] = {{OP_ADD, 0}, {OP_HALT, 0}}; // ADD with nothing pushed
+    Program p = {code, 2};
+    VM vm;
+    vm_init(&vm, &p);
+    assert(vm_run(&vm, 0, stdout) == -1);
+    printf("ok: stack underflow rejected\n");
+}
+
+static void test_missing_halt_edge_case(void) {
+    Instruction code[] = {{OP_PUSH, 1}}; // falls off the end
+    Program p = {code, 1};
+    VM vm;
+    vm_init(&vm, &p);
+    assert(vm_run(&vm, 0, stdout) == -1);
+    printf("ok: missing HALT rejected\n");
+}
+
+static void test_invalid_jump_target_invalid_case(void) {
+    Instruction code[] = {{OP_JUMP, 99}, {OP_HALT, 0}};
+    Program p = {code, 2};
+    VM vm;
+    vm_init(&vm, &p);
+    assert(vm_run(&vm, 0, stdout) == -1);
+    printf("ok: invalid jump target rejected\n");
+}
+
+static void test_assembler_normal_case(void) {
+    Program p;
+    assert(assemble_file("examples/add.bytecode", &p) == 0);
+    assert(p.count == 5);
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "30\n") == 0);
+    printf("ok: assembler loads examples/add.bytecode -> %s", out);
+    free(p.code);
+}
+
+static void write_file(const char *path, const char *contents) {
+    FILE *f = fopen(path, "w");
+    assert(f != NULL);
+    fputs(contents, f);
+    fclose(f);
+}
+
+static void test_assembler_unknown_mnemonic_invalid_case(void) {
+    write_file("tests/tmp_bad_mnemonic.bytecode", "PUSH 1\nBOGUS\nHALT\n");
+    Program p;
+    assert(assemble_file("tests/tmp_bad_mnemonic.bytecode", &p) == -1);
+    remove("tests/tmp_bad_mnemonic.bytecode");
+    printf("ok: unknown mnemonic rejected\n");
+}
+
+static void test_assembler_missing_operand_invalid_case(void) {
+    write_file("tests/tmp_missing_operand.bytecode", "PUSH\nHALT\n");
+    Program p;
+    assert(assemble_file("tests/tmp_missing_operand.bytecode", &p) == -1);
+    remove("tests/tmp_missing_operand.bytecode");
+    printf("ok: missing operand rejected\n");
+}
+
+static void test_empty_program_edge_case(void) {
+    write_file("tests/tmp_empty.bytecode", "# just a comment\n\n");
+    Program p;
+    assert(assemble_file("tests/tmp_empty.bytecode", &p) == 0);
+    assert(p.count == 0);
+    VM vm;
+    vm_init(&vm, &p);
+    assert(vm_run(&vm, 0, stdout) == -1); // pc=0 >= count=0, no HALT reached
+    remove("tests/tmp_empty.bytecode");
+    free(p.code);
+    printf("ok: empty program rejected at runtime (no HALT)\n");
+}
+
+int main(void) {
+    test_push_add_print_normal_case();
+    test_sub_mul_div_normal_case();
+    test_load_store_roundtrip();
+    test_unconditional_jump_skips_instructions();
+    test_jump_if_false_taken();
+    test_jump_if_false_not_taken();
+    test_countdown_loop_regression();
+    test_division_by_zero_invalid_case();
+    test_stack_underflow_invalid_case();
+    test_missing_halt_edge_case();
+    test_invalid_jump_target_invalid_case();
+    test_assembler_normal_case();
+    test_assembler_unknown_mnemonic_invalid_case();
+    test_assembler_missing_operand_invalid_case();
+    test_empty_program_edge_case();
+    printf("all tests passed\n");
+    return 0;
+}

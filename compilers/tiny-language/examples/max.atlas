@@ -1,0 +1,7 @@
+let a = 7;
+let b = 42;
+if (a > b) {
+    print(a);
+} else {
+    print(b);
+}

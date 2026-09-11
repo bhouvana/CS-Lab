@@ -12,6 +12,8 @@ build/
 # Rust
 target/
 
+*.tmp
+
 # Editors / OS
 .vscode/
 .idea/

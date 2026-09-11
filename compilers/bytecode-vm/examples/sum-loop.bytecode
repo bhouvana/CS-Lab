@@ -1,0 +1,20 @@
+# sums 5+4+3+2+1 = 15 using slot 0 as counter, slot 1 as running sum.
+# jump targets are raw 0-based instruction indices (no labels in this VM).
+PUSH 5           # 0:  counter = 5
+STORE 0          # 1
+PUSH 0           # 2:  sum = 0
+STORE 1          # 3
+LOAD 0           # 4:  loop_start: push counter
+JUMP_IF_FALSE 15 # 5:  if counter == 0, goto end (15)
+LOAD 1           # 6
+LOAD 0           # 7
+ADD              # 8:  sum + counter
+STORE 1          # 9:  sum = sum + counter
+LOAD 0           # 10
+PUSH 1           # 11
+SUB              # 12: counter - 1
+STORE 0          # 13: counter = counter - 1
+JUMP 4           # 14: goto loop_start
+LOAD 1           # 15: end: push sum
+PRINT            # 16
+HALT             # 17
