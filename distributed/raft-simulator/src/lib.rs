@@ -76,7 +76,9 @@ impl Cluster {
     /// randomizes timeouts to avoid split votes); see README.
     pub fn new(n: usize) -> Self {
         let election_timeout_base = 150;
-        let nodes = (0..n).map(|id| Node::new(id, election_timeout_base + (id as u64) * 10)).collect();
+        let nodes = (0..n)
+            .map(|id| Node::new(id, election_timeout_base + (id as u64) * 10))
+            .collect();
         Cluster {
             nodes,
             alive: vec![true; n],
@@ -89,7 +91,8 @@ impl Cluster {
 
     pub fn kill(&mut self, id: usize) {
         self.alive[id] = false;
-        self.events.push(format!("tick {}: node {} killed", self.tick_count, id));
+        self.events
+            .push(format!("tick {}: node {} killed", self.tick_count, id));
     }
 
     pub fn revive(&mut self, id: usize) {
@@ -97,11 +100,18 @@ impl Cluster {
         self.nodes[id].role = Role::Follower;
         self.nodes[id].voted_for = None;
         self.reset_deadline(id);
-        self.events.push(format!("tick {}: node {} revived (rejoins as follower)", self.tick_count, id));
+        self.events.push(format!(
+            "tick {}: node {} revived (rejoins as follower)",
+            self.tick_count, id
+        ));
     }
 
     pub fn leader(&self) -> Option<usize> {
-        self.nodes.iter().enumerate().find(|(i, n)| self.alive[*i] && n.role == Role::Leader).map(|(i, _)| i)
+        self.nodes
+            .iter()
+            .enumerate()
+            .find(|(i, n)| self.alive[*i] && n.role == Role::Leader)
+            .map(|(i, _)| i)
     }
 
     /// Submits a command to the current leader's log. Returns false if
@@ -109,7 +119,10 @@ impl Cluster {
     pub fn submit(&mut self, command: &str) -> bool {
         let Some(leader) = self.leader() else { return false };
         let term = self.nodes[leader].current_term;
-        self.nodes[leader].log.push(LogEntry { term, command: command.to_string() });
+        self.nodes[leader].log.push(LogEntry {
+            term,
+            command: command.to_string(),
+        });
         self.events.push(format!(
             "tick {}: leader {} appends '{}' at log index {}",
             self.tick_count,
@@ -123,8 +136,9 @@ impl Cluster {
     pub fn tick(&mut self) {
         self.tick_count += 1;
 
-        let leaders: Vec<usize> =
-            (0..self.nodes.len()).filter(|&i| self.alive[i] && self.nodes[i].role == Role::Leader).collect();
+        let leaders: Vec<usize> = (0..self.nodes.len())
+            .filter(|&i| self.alive[i] && self.nodes[i].role == Role::Leader)
+            .collect();
         for leader in leaders {
             if self.tick_count.is_multiple_of(self.heartbeat_interval) {
                 self.send_heartbeats(leader);
@@ -132,7 +146,11 @@ impl Cluster {
         }
 
         let timed_out: Vec<usize> = (0..self.nodes.len())
-            .filter(|&i| self.alive[i] && self.nodes[i].role != Role::Leader && self.tick_count >= self.nodes[i].election_deadline)
+            .filter(|&i| {
+                self.alive[i]
+                    && self.nodes[i].role != Role::Leader
+                    && self.tick_count >= self.nodes[i].election_deadline
+            })
             .collect();
         for id in timed_out {
             if self.alive[id] && self.nodes[id].role != Role::Leader {
@@ -166,7 +184,10 @@ impl Cluster {
         self.nodes[id].voted_for = Some(id);
         self.reset_deadline(id);
         let term = self.nodes[id].current_term;
-        self.events.push(format!("tick {}: node {} times out, starts election for term {}", self.tick_count, id, term));
+        self.events.push(format!(
+            "tick {}: node {} times out, starts election for term {}",
+            self.tick_count, id, term
+        ));
 
         let (last_log_index, last_log_term) = self.nodes[id].last_log_info();
         let mut votes = 1usize; // votes for self
@@ -191,11 +212,21 @@ impl Cluster {
         if votes * 2 > n {
             self.become_leader(id);
         } else {
-            self.events.push(format!("tick {}: node {} lost the election for term {} ({votes}/{n} votes)", self.tick_count, id, term));
+            self.events.push(format!(
+                "tick {}: node {} lost the election for term {} ({votes}/{n} votes)",
+                self.tick_count, id, term
+            ));
         }
     }
 
-    fn handle_request_vote(&mut self, voter: usize, term: u64, candidate_id: usize, last_log_index: usize, last_log_term: u64) -> (bool, u64) {
+    fn handle_request_vote(
+        &mut self,
+        voter: usize,
+        term: u64,
+        candidate_id: usize,
+        last_log_index: usize,
+        last_log_term: u64,
+    ) -> (bool, u64) {
         if term > self.nodes[voter].current_term {
             self.become_follower(voter, term);
         }
@@ -205,7 +236,8 @@ impl Cluster {
             let (my_last_index, my_last_term) = self.nodes[voter].last_log_info();
             // Raft's "at least as up to date" rule: higher term wins;
             // equal term, longer (or equal) log wins.
-            let log_ok = last_log_term > my_last_term || (last_log_term == my_last_term && last_log_index >= my_last_index);
+            let log_ok =
+                last_log_term > my_last_term || (last_log_term == my_last_term && last_log_index >= my_last_index);
             if can_vote && log_ok {
                 self.nodes[voter].voted_for = Some(candidate_id);
                 self.reset_deadline(voter); // granting a vote is "hearing from a leader-ish peer": don't also time out
@@ -218,7 +250,10 @@ impl Cluster {
     fn become_leader(&mut self, id: usize) {
         self.nodes[id].role = Role::Leader;
         let term = self.nodes[id].current_term;
-        self.events.push(format!("tick {}: node {} becomes LEADER for term {}", self.tick_count, id, term));
+        self.events.push(format!(
+            "tick {}: node {} becomes LEADER for term {}",
+            self.tick_count, id, term
+        ));
         let log_len = self.nodes[id].log.len();
         for other in 0..self.nodes.len() {
             self.nodes[id].next_index.insert(other, log_len);
@@ -240,14 +275,25 @@ impl Cluster {
     fn replicate_to(&mut self, leader: usize, follower: usize) {
         let next = *self.nodes[leader].next_index.get(&follower).unwrap_or(&0);
         let prev_log_index = next;
-        let prev_log_term = if prev_log_index == 0 { 0 } else { self.nodes[leader].log[prev_log_index - 1].term };
+        let prev_log_term = if prev_log_index == 0 {
+            0
+        } else {
+            self.nodes[leader].log[prev_log_index - 1].term
+        };
         let entries: Vec<LogEntry> = self.nodes[leader].log[next..].to_vec();
         let term = self.nodes[leader].current_term;
         let leader_commit = self.nodes[leader].commit_index;
         let n_entries = entries.len();
 
-        let (success, reply_term) =
-            self.handle_append_entries(follower, term, leader, prev_log_index, prev_log_term, entries, leader_commit);
+        let (success, reply_term) = self.handle_append_entries(
+            follower,
+            term,
+            leader,
+            prev_log_index,
+            prev_log_term,
+            entries,
+            leader_commit,
+        );
 
         if reply_term > self.nodes[leader].current_term {
             self.become_follower(leader, reply_term);
@@ -270,8 +316,14 @@ impl Cluster {
     // these same fields, not simplify anything.
     #[allow(clippy::too_many_arguments)]
     fn handle_append_entries(
-        &mut self, follower: usize, term: u64, leader_id: usize, prev_log_index: usize, prev_log_term: u64,
-        entries: Vec<LogEntry>, leader_commit: usize,
+        &mut self,
+        follower: usize,
+        term: u64,
+        leader_id: usize,
+        prev_log_index: usize,
+        prev_log_term: u64,
+        entries: Vec<LogEntry>,
+        leader_commit: usize,
     ) -> (bool, u64) {
         if term < self.nodes[follower].current_term {
             return (false, self.nodes[follower].current_term);
@@ -331,7 +383,10 @@ impl Cluster {
             }
             if count * 2 > n {
                 self.nodes[leader].commit_index = index;
-                self.events.push(format!("tick {}: leader {} commits log index {}", self.tick_count, leader, index));
+                self.events.push(format!(
+                    "tick {}: leader {} commits log index {}",
+                    self.tick_count, leader, index
+                ));
                 break;
             }
         }

@@ -63,9 +63,10 @@ pub fn tokenize(source: &str) -> Result<Vec<(Token, usize)>, LexError> {
                     i += 1;
                 }
                 let text: String = chars[start..i].iter().collect();
-                let value: i64 = text
-                    .parse()
-                    .map_err(|_| LexError { message: format!("invalid integer literal '{text}'"), line })?;
+                let value: i64 = text.parse().map_err(|_| LexError {
+                    message: format!("invalid integer literal '{text}'"),
+                    line,
+                })?;
                 tokens.push((Token::Int(value), line));
             }
             'a'..='z' | 'A'..='Z' | '_' => {
@@ -138,7 +139,10 @@ pub fn tokenize(source: &str) -> Result<Vec<(Token, usize)>, LexError> {
                     tokens.push((Token::Ne, line));
                     i += 2;
                 } else {
-                    return Err(LexError { message: "unexpected '!' (did you mean '!='?)".into(), line });
+                    return Err(LexError {
+                        message: "unexpected '!' (did you mean '!='?)".into(),
+                        line,
+                    });
                 }
             }
             '<' => {
@@ -159,7 +163,12 @@ pub fn tokenize(source: &str) -> Result<Vec<(Token, usize)>, LexError> {
                     i += 1;
                 }
             }
-            other => return Err(LexError { message: format!("unexpected character '{other}'"), line }),
+            other => {
+                return Err(LexError {
+                    message: format!("unexpected character '{other}'"),
+                    line,
+                })
+            }
         }
     }
     tokens.push((Token::Eof, line));

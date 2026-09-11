@@ -20,8 +20,12 @@ impl BloomFilter {
     pub fn new(num_bits: usize, num_hashes: usize) -> Self {
         assert!(num_bits > 0, "num_bits must be > 0");
         assert!(num_hashes > 0, "num_hashes must be > 0");
-        let words = (num_bits + 63) / 64;
-        BloomFilter { bits: vec![0u64; words], num_bits, num_hashes }
+        let words = num_bits.div_ceil(64);
+        BloomFilter {
+            bits: vec![0u64; words],
+            num_bits,
+            num_hashes,
+        }
     }
 
     /// Bit-array size `m` and hash count `k` that minimize false-positive

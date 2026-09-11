@@ -14,6 +14,10 @@ target/
 
 *.tmp
 
+# Python
+__pycache__/
+*.pyc
+
 # Editors / OS
 .vscode/
 .idea/

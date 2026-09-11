@@ -20,7 +20,10 @@ impl Default for Interpreter {
 
 impl Interpreter {
     pub fn new() -> Self {
-        Interpreter { vars: HashMap::new(), output: Vec::new() }
+        Interpreter {
+            vars: HashMap::new(),
+            output: Vec::new(),
+        }
     }
 
     pub fn run(&mut self, program: &[Stmt]) -> Result<(), String> {
@@ -67,9 +70,11 @@ impl Interpreter {
     fn eval(&self, expr: &Expr) -> Result<i64, String> {
         match expr {
             Expr::Int(v) => Ok(*v),
-            Expr::Var(name) => {
-                self.vars.get(name).copied().ok_or_else(|| format!("undefined variable '{name}'"))
-            }
+            Expr::Var(name) => self
+                .vars
+                .get(name)
+                .copied()
+                .ok_or_else(|| format!("undefined variable '{name}'")),
             Expr::Neg(inner) => Ok(-self.eval(inner)?),
             Expr::Binary(left, op, right) => {
                 let l = self.eval(left)?;

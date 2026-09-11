@@ -33,7 +33,12 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            Err(format!("line {}: expected {:?}, found {:?}", self.line(), expected, self.peek()))
+            Err(format!(
+                "line {}: expected {:?}, found {:?}",
+                self.line(),
+                expected,
+                self.peek()
+            ))
         }
     }
 
@@ -109,7 +114,11 @@ impl Parser {
                 self.expect(&Token::Semi)?;
                 Ok(Stmt::Assign(name, expr))
             }
-            other => Err(format!("line {}: unexpected token {:?} at start of statement", self.line(), other)),
+            other => Err(format!(
+                "line {}: unexpected token {:?} at start of statement",
+                self.line(),
+                other
+            )),
         }
     }
 
@@ -185,7 +194,11 @@ impl Parser {
                 self.expect(&Token::RParen)?;
                 Ok(expr)
             }
-            other => Err(format!("line {}: unexpected token {:?} in expression", self.line(), other)),
+            other => Err(format!(
+                "line {}: unexpected token {:?} in expression",
+                self.line(),
+                other
+            )),
         }
     }
 }

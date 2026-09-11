@@ -22,6 +22,14 @@ static int read_whole_file(const char *path, uint8_t **buf, size_t *len) {
     return 0;
 }
 
+// clock()'s resolution is too coarse (notoriously ~15ms on Windows) to
+// time a single compress/decompress of a small file directly -- it was
+// observed reading a flat 0.000ms for every dataset here on a native
+// Windows/MinGW build. Repeat until at least MIN_MS have elapsed and
+// report the per-run average, same fix already applied in the other
+// labs' bench.c (sha256, bytecode-vm, garbage-collector).
+#define MIN_MS 50.0
+
 static void bench_one(const char *label, const char *path) {
     uint8_t *data;
     size_t len;
@@ -30,17 +38,31 @@ static void bench_one(const char *label, const char *path) {
         return;
     }
 
+    int reps = 0;
     clock_t t0 = clock();
-    uint8_t *compressed;
-    size_t compressed_len;
-    huffman_compress_buffer(data, len, &compressed, &compressed_len);
-    double encode_ms = 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC;
+    double encode_ms;
+    uint8_t *compressed = NULL;
+    size_t compressed_len = 0;
+    do {
+        free(compressed);
+        huffman_compress_buffer(data, len, &compressed, &compressed_len);
+        reps++;
+        encode_ms = 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC;
+    } while (encode_ms < MIN_MS && reps < 100000);
+    encode_ms /= reps;
 
+    reps = 0;
     t0 = clock();
-    uint8_t *decompressed;
-    size_t decompressed_len;
-    huffman_decompress_buffer(compressed, compressed_len, &decompressed, &decompressed_len);
-    double decode_ms = 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC;
+    double decode_ms;
+    uint8_t *decompressed = NULL;
+    size_t decompressed_len = 0;
+    do {
+        free(decompressed);
+        huffman_decompress_buffer(compressed, compressed_len, &decompressed, &decompressed_len);
+        reps++;
+        decode_ms = 1000.0 * (double)(clock() - t0) / CLOCKS_PER_SEC;
+    } while (decode_ms < MIN_MS && reps < 100000);
+    decode_ms /= reps;
 
     double ratio = len > 0 ? 100.0 * (double)compressed_len / (double)len : 0.0;
     printf("%-12s %10lu %14lu %9.2f%% %10.3f %10.3f\n", label, (unsigned long)len, (unsigned long)compressed_len, ratio,

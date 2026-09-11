@@ -48,7 +48,10 @@ fn read_entry<R: Read>(r: &mut R) -> io::Result<Option<(String, String)>> {
     r.read_exact(&mut len_buf)?;
     let mut vbuf = vec![0u8; u32::from_le_bytes(len_buf) as usize];
     r.read_exact(&mut vbuf)?;
-    Ok(Some((String::from_utf8_lossy(&kbuf).into_owned(), String::from_utf8_lossy(&vbuf).into_owned())))
+    Ok(Some((
+        String::from_utf8_lossy(&kbuf).into_owned(),
+        String::from_utf8_lossy(&vbuf).into_owned(),
+    )))
 }
 
 fn read_all_entries(path: &Path) -> io::Result<Vec<(String, String)>> {
@@ -95,7 +98,13 @@ impl Lsm {
             .collect();
         sstable_paths.sort(); // filenames are zero-padded, so lexical order == creation order
 
-        Ok(Lsm { dir, memtable, wal, sstable_paths, memtable_limit: 4 })
+        Ok(Lsm {
+            dir,
+            memtable,
+            wal,
+            sstable_paths,
+            memtable_limit: 4,
+        })
     }
 
     /// Appends to the WAL (fsync'd before returning -- this is what
@@ -144,7 +153,11 @@ impl Lsm {
         self.sstable_paths.push(path);
         self.memtable.clear();
 
-        self.wal = OpenOptions::new().create(true).write(true).truncate(true).open(self.dir.join("wal.log"))?;
+        self.wal = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(self.dir.join("wal.log"))?;
         Ok(())
     }
 

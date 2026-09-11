@@ -22,7 +22,11 @@ fn demo() {
     }
     println!("inserted: apple, banana, cherry\n");
     for w in ["apple", "banana", "cherry", "date", "fig"] {
-        let verdict = if bf.contains(w.as_bytes()) { "probably present" } else { "definitely absent" };
+        let verdict = if bf.contains(w.as_bytes()) {
+            "probably present"
+        } else {
+            "definitely absent"
+        };
         println!("{w:8} -> {verdict}");
     }
 }

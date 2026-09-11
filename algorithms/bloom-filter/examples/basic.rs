@@ -11,6 +11,13 @@ fn main() {
     }
 
     for word in ["rust", "hash", "not-inserted"] {
-        println!("{word:16} -> {}", if bf.contains(word.as_bytes()) { "probably present" } else { "definitely absent" });
+        println!(
+            "{word:16} -> {}",
+            if bf.contains(word.as_bytes()) {
+                "probably present"
+            } else {
+                "definitely absent"
+            }
+        );
     }
 }
