@@ -89,6 +89,70 @@ static void test_comparison_opcodes_normal_case(void) {
     printf("ok: all 6 comparison opcodes (LT/LE/GT/GE/EQ/NE) correct both ways\n");
 }
 
+static void test_call_ret_subroutine_normal_case(void) {
+    // Mirrors examples/call-ret.bytecode: call a "double" subroutine
+    // twice with different inputs, verifying the return address is
+    // correct both times (not just "works once").
+    Instruction prog[] = {
+        /*0*/ {OP_PUSH, 21},
+        /*1*/ {OP_STORE, 0},
+        /*2*/ {OP_CALL, 11},
+        /*3*/ {OP_LOAD, 1},
+        /*4*/ {OP_PRINT, 0},
+        /*5*/ {OP_PUSH, 100},
+        /*6*/ {OP_STORE, 0},
+        /*7*/ {OP_CALL, 11},
+        /*8*/ {OP_LOAD, 1},
+        /*9*/ {OP_PRINT, 0},
+        /*10*/ {OP_JUMP, 16},
+        /*11 double: */ {OP_LOAD, 0},
+        /*12*/ {OP_PUSH, 2},
+        /*13*/ {OP_MUL, 0},
+        /*14*/ {OP_STORE, 1},
+        /*15*/ {OP_RET, 0},
+        /*16 end: */ {OP_HALT, 0},
+    };
+    Program p = {prog, sizeof(prog) / sizeof(prog[0])};
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "42\n200\n") == 0);
+    printf("ok: CALL/RET subroutine called twice -> %s", out);
+}
+
+static void test_ret_without_call_invalid_case(void) {
+    Instruction code[] = {{OP_RET, 0}, {OP_HALT, 0}};
+    Program p = {code, 2};
+    VM vm;
+    vm_init(&vm, &p);
+    assert(vm_run(&vm, 0, stdout) == -1);
+    printf("ok: RET with no matching CALL rejected\n");
+}
+
+static void test_call_stack_overflow_invalid_case(void) {
+    // A subroutine that unconditionally calls itself: real recursion
+    // with no base case, so the call stack -- not the data stack --
+    // is what should overflow first.
+    Instruction code[] = {
+        /*0 loop: */ {OP_CALL, 0},
+        /*1*/ {OP_RET, 0},
+    };
+    Program p = {code, 2};
+    VM vm;
+    vm_init(&vm, &p);
+    assert(vm_run(&vm, 0, stdout) == -1);
+    printf("ok: unbounded CALL recursion is rejected (call stack overflow)\n");
+}
+
+static void test_examples_call_ret_normal_case(void) {
+    Program p;
+    assert(assemble_file("examples/call-ret.bytecode", &p) == 0);
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "42\n200\n") == 0);
+    free(p.code);
+    printf("ok: examples/call-ret.bytecode -> %s", out);
+}
+
 static void test_sub_mul_div_normal_case(void) {
     // (10 - 3) * 2 / 7 = 2
     Instruction code[] = {
@@ -320,6 +384,50 @@ static void test_assembler_missing_operand_invalid_case(void) {
     printf("ok: missing operand rejected\n");
 }
 
+static void test_assembler_resolves_labels_normal_case(void) {
+    Program labeled, indexed;
+    assert(assemble_file("examples/sum-loop-labeled.bytecode", &labeled) == 0);
+    assert(assemble_file("examples/sum-loop.bytecode", &indexed) == 0);
+
+    // Labels are just a nicer way to write the same jump targets -- the
+    // two files should assemble to structurally identical programs.
+    assert(labeled.count == indexed.count);
+    for (size_t i = 0; i < labeled.count; i++) {
+        assert(labeled.code[i].op == indexed.code[i].op);
+        assert(labeled.code[i].operand == indexed.code[i].operand);
+    }
+
+    char out[64];
+    run_and_capture(&labeled, 0, out, sizeof(out));
+    assert(strcmp(out, "15\n") == 0);
+
+    free(labeled.code);
+    free(indexed.code);
+    printf("ok: labeled and hand-indexed jump targets assemble identically\n");
+}
+
+static void test_assembler_undefined_label_invalid_case(void) {
+    write_file("tests/tmp_bad_label.bytecode", "PUSH 1\nJUMP_IF_FALSE nowhere\nHALT\n");
+    Program p;
+    assert(assemble_file("tests/tmp_bad_label.bytecode", &p) == -1);
+    remove("tests/tmp_bad_label.bytecode");
+    printf("ok: a jump to an undefined label is rejected\n");
+}
+
+static void test_assembler_label_at_end_of_program_edge_case(void) {
+    // A label with nothing after it points one past the last real
+    // instruction -- exactly like JUMP_IF_FALSE's normal "skip past
+    // the end when the branch isn't taken" target already does.
+    write_file("tests/tmp_label_at_end.bytecode", "PUSH 0\nJUMP_IF_FALSE done\nPUSH 999\ndone:\nHALT\n");
+    Program p;
+    assert(assemble_file("tests/tmp_label_at_end.bytecode", &p) == 0);
+    assert(p.count == 4); // PUSH 0, JUMP_IF_FALSE, PUSH 999, HALT -- "done:" itself emits nothing
+    assert(p.code[1].operand == 3); // skips the PUSH 999, lands on HALT (index 3)
+    remove("tests/tmp_label_at_end.bytecode");
+    free(p.code);
+    printf("ok: a label at the very end of the program resolves correctly\n");
+}
+
 static void test_assembler_recognizes_new_opcodes_normal_case(void) {
     write_file("tests/tmp_new_opcodes.bytecode", "PUSH 10\nPUSH 3\nMOD\nPUSH 2\nLT\nPRINT\nHALT\n");
     Program p;
@@ -362,6 +470,13 @@ int main(void) {
     test_missing_halt_edge_case();
     test_invalid_jump_target_invalid_case();
     test_assembler_normal_case();
+    test_assembler_resolves_labels_normal_case();
+    test_assembler_undefined_label_invalid_case();
+    test_assembler_label_at_end_of_program_edge_case();
+    test_call_ret_subroutine_normal_case();
+    test_ret_without_call_invalid_case();
+    test_call_stack_overflow_invalid_case();
+    test_examples_call_ret_normal_case();
     test_assembler_unknown_mnemonic_invalid_case();
     test_assembler_missing_operand_invalid_case();
     test_empty_program_edge_case();

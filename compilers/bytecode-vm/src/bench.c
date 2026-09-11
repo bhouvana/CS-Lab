@@ -2,6 +2,7 @@
 //   1. Raw VM throughput on a tight countdown loop, at increasing
 //      iteration counts.
 //   2. How much does --trace cost, at equal iteration count?
+//   3. How much does one CALL+RET pair cost, per loop iteration?
 #include "vm.h"
 
 #include <stdlib.h>
@@ -26,6 +27,30 @@ static Program build_countdown_program(int64_t n) {
     return p;
 }
 
+// Identical to build_countdown_program, except each iteration also
+// CALLs a subroutine that does nothing but RET immediately -- isolating
+// the cost of one CALL+RET pair with everything else about the loop
+// held constant.
+static Program build_countdown_with_call_program(int64_t n) {
+    Instruction *code = malloc(14 * sizeof(Instruction));
+    code[0] = (Instruction){OP_PUSH, n};
+    code[1] = (Instruction){OP_STORE, 0};
+    code[2] = (Instruction){OP_LOAD, 0};           // loop_start
+    code[3] = (Instruction){OP_JUMP_IF_FALSE, 10}; // -> end
+    code[4] = (Instruction){OP_CALL, 13};          // -> noop
+    code[5] = (Instruction){OP_LOAD, 0};
+    code[6] = (Instruction){OP_PUSH, 1};
+    code[7] = (Instruction){OP_SUB, 0};
+    code[8] = (Instruction){OP_STORE, 0};
+    code[9] = (Instruction){OP_JUMP, 2}; // -> loop_start
+    code[10] = (Instruction){OP_PUSH, 0}; // end
+    code[11] = (Instruction){OP_PRINT, 0};
+    code[12] = (Instruction){OP_HALT, 0};
+    code[13] = (Instruction){OP_RET, 0}; // noop
+    Program p = {code, 14};
+    return p;
+}
+
 // clock()'s resolution (notoriously ~15ms on Windows) is too coarse to
 // time a single fast run directly, so this repeats the run until at
 // least MIN_MS have elapsed in total, then reports the per-run average
@@ -34,12 +59,12 @@ static Program build_countdown_program(int64_t n) {
 // output never pollutes the benchmark table.
 #define MIN_MS 50.0
 
-static double run_timed(int64_t n, int trace, FILE *out, int *reps_out) {
+static double run_timed_program(Program (*build)(int64_t), int64_t n, int trace, FILE *out, int *reps_out) {
     int reps = 0;
     clock_t t0 = clock();
     double elapsed_ms;
     do {
-        Program p = build_countdown_program(n);
+        Program p = build(n);
         VM vm;
         vm_init(&vm, &p);
         vm_run(&vm, trace, out);
@@ -49,6 +74,10 @@ static double run_timed(int64_t n, int trace, FILE *out, int *reps_out) {
     } while (elapsed_ms < MIN_MS && reps < 10000);
     if (reps_out) *reps_out = reps;
     return elapsed_ms / reps;
+}
+
+static double run_timed(int64_t n, int trace, FILE *out, int *reps_out) {
+    return run_timed_program(build_countdown_program, n, trace, out, reps_out);
 }
 
 int main(void) {
@@ -80,6 +109,15 @@ int main(void) {
     double trace_ms = run_timed(sizes[0], 1, scratch, &trace_reps);
     printf("no trace: %8.4f ms/run (%d reps)\n", baseline_ms, baseline_reps);
     printf("trace:    %8.4f ms/run (%d reps)  -> %.1fx slower\n", trace_ms, trace_reps, trace_ms / baseline_ms);
+
+    printf("\nBenchmark: CALL/RET overhead, at %lld iterations\n", (long long)sizes[0]);
+    printf("(identical loop, with vs. without one CALL+RET pair per iteration)\n\n");
+    int call_reps;
+    double call_ms = run_timed_program(build_countdown_with_call_program, sizes[0], 0, scratch, &call_reps);
+    double per_call_ns = (call_ms - baseline_ms) * 1e6 / (double)sizes[0];
+    printf("no call:   %8.4f ms/run (%d reps)\n", baseline_ms, baseline_reps);
+    printf("with call: %8.4f ms/run (%d reps)  -> %.2fx slower, ~%.1fns added per CALL+RET pair\n", call_ms,
+           call_reps, call_ms / baseline_ms, per_call_ns);
 
     fclose(scratch);
     remove(scratch_path);

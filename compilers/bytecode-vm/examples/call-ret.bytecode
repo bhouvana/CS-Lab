@@ -1,0 +1,26 @@
+# Calls a "double" subroutine twice on different values (slot 0 in,
+# slot 1 out), demonstrating CALL/RET -- no parameter-passing beyond
+# ordinary memory slots (STORE before CALL, LOAD after).
+PUSH 21
+STORE 0
+CALL double
+LOAD 1
+PRINT           # 42
+
+PUSH 100
+STORE 0
+CALL double
+LOAD 1
+PRINT           # 200
+
+JUMP end
+
+double:
+LOAD 0
+PUSH 2
+MUL
+STORE 1
+RET
+
+end:
+HALT

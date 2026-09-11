@@ -35,6 +35,16 @@ typedef enum {
     OP_STORE,
     OP_JUMP,
     OP_JUMP_IF_FALSE,
+    // Subroutines: CALL pushes the return address (the instruction
+    // right after it) onto a separate call stack and jumps to its
+    // target; RET pops that address and jumps back. A *separate*
+    // stack from the data one -- so a callee's own PUSH/POP traffic
+    // can never corrupt a pending return address, and vice versa.
+    // Arguments/return values still go through ordinary memory slots
+    // (STORE before CALL, LOAD after) -- there's no calling convention
+    // beyond that.
+    OP_CALL,
+    OP_RET,
     OP_PRINT,
     OP_HALT,
 } Opcode;
@@ -64,11 +74,14 @@ int assemble_file(const char *path, Program *program);
 
 #define STACK_MAX 1024
 #define MEMORY_SLOTS 256
+#define CALL_STACK_MAX 256
 
 typedef struct {
     int64_t stack[STACK_MAX];
     int sp; // number of values currently on the stack
     int64_t memory[MEMORY_SLOTS];
+    size_t call_stack[CALL_STACK_MAX]; // return addresses, pushed by CALL, popped by RET
+    int call_sp;
     const Program *program;
     size_t pc;
 } VM;

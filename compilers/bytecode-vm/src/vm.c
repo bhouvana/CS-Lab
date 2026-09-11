@@ -4,6 +4,7 @@
 void vm_init(VM *vm, const Program *program) {
     vm->sp = 0;
     for (int i = 0; i < MEMORY_SLOTS; i++) vm->memory[i] = 0;
+    vm->call_sp = 0;
     vm->program = program;
     vm->pc = 0;
 }
@@ -49,6 +50,7 @@ static void print_trace_line(FILE *out, Instruction instr) {
         case OP_STORE:
         case OP_JUMP:
         case OP_JUMP_IF_FALSE:
+        case OP_CALL:
             fprintf(out, "%s %lld\n", opcode_name(instr.op), (long long)instr.operand);
             break;
         default:
@@ -140,6 +142,22 @@ int vm_run(VM *vm, int trace, FILE *out) {
             case OP_NE:
                 if (do_pop(vm, &b) != 0 || do_pop(vm, &a) != 0) return -1;
                 if (do_push(vm, a != b) != 0) return -1;
+                break;
+            case OP_CALL:
+                if (!valid_target(vm, instr.operand)) return -1;
+                if (vm->call_sp >= CALL_STACK_MAX) {
+                    fprintf(stderr, "call stack overflow at pc=%zu\n", vm->pc);
+                    return -1;
+                }
+                vm->call_stack[vm->call_sp++] = next_pc; // return to the instruction right after this CALL
+                next_pc = (size_t)instr.operand;
+                break;
+            case OP_RET:
+                if (vm->call_sp <= 0) {
+                    fprintf(stderr, "RET with no matching CALL at pc=%zu\n", vm->pc);
+                    return -1;
+                }
+                next_pc = vm->call_stack[--vm->call_sp];
                 break;
             case OP_LOAD:
                 if (!valid_slot(vm, instr.operand)) return -1;

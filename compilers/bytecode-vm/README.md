@@ -9,6 +9,7 @@ it one instruction at a time.
 ```bash
 ./vm examples/add.bytecode
 ./vm examples/add.bytecode --trace
+./vm examples/call-ret.bytecode
 ```
 
 ## Why does it matter?
@@ -34,20 +35,34 @@ execute  (mutate the stack/memory, compute next pc)
 repeat   (until HALT or an error)
 ```
 
-12 opcodes: `PUSH POP ADD SUB MUL DIV LOAD STORE JUMP JUMP_IF_FALSE
-PRINT HALT`. `LOAD`/`STORE` address 256 integer memory slots (simple
-global variables). `JUMP`/`JUMP_IF_FALSE` targets are **raw 0-based
-instruction indices** — this VM has no labels, so a loop's jump target
-is whatever index its destination instruction happens to be at (see
-`examples/sum-loop.bytecode`, which comments every line with its
-index for exactly this reason).
+19 opcodes: `PUSH POP ADD SUB MUL DIV MOD LT LE GT GE EQ NE LOAD STORE
+JUMP JUMP_IF_FALSE CALL RET PRINT HALT`. `LOAD`/`STORE` address 256
+integer memory slots (simple global variables). `JUMP`/`JUMP_IF_FALSE`/
+`CALL` targets can be either a raw 0-based instruction index or a
+symbolic **label** (`loop:` on its own line) that the assembler
+resolves in a first pass — see `examples/sum-loop.bytecode` (raw
+indices, hand-counted and comment-annotated) vs.
+`examples/sum-loop-labeled.bytecode` (the same program with labels)
+for the difference. `CALL`/`RET` give subroutines a separate return-
+address stack from the data stack.
 
 ## How it works
 
 - `src/assembler.c` parses one instruction per line (`#` starts a
   comment), turning mnemonics into `Instruction{ op, operand }` values.
+  Two passes: the first walks the file recording where each label
+  (`identifier:` alone on a line) points -- the index of the next real
+  instruction after it, since a label defines a position, not an
+  instruction of its own -- without emitting anything; the second
+  parses every real instruction, resolving a `JUMP`/`JUMP_IF_FALSE`/
+  `CALL` operand against that table whenever it isn't a plain integer.
+  A raw numeric operand still works exactly as before -- labels are
+  additive, not a breaking change to existing `.bytecode` files.
 - `src/vm.c` is the fetch/decode/execute loop: a 1024-slot `int64_t`
-  stack, 256 memory slots, and a `switch` over `Opcode`.
+  data stack, a *separate* 256-slot return-address stack for
+  `CALL`/`RET` (so a callee's own PUSH/POP traffic can never corrupt a
+  pending return address), 256 memory slots, and a `switch` over
+  `Opcode`.
 - `--trace` prints each instruction as it executes, then the resulting
   stack — exactly the format in the project directive.
 - All output (both `PRINT` and `--trace` lines) goes through a `FILE
@@ -64,8 +79,11 @@ index for exactly this reason).
 - `src/vm.c` — the interpreter loop.
 - `src/main.c` — CLI.
 - `src/bench.c` — the throughput and `--trace` overhead experiments.
-- `tests/test_vm.c` — 15 tests: every opcode, jumps taken/not-taken, a
-  full loop program, and 6 invalid/edge cases.
+- `tests/test_vm.c` — 27 tests: every opcode (including the 6
+  comparisons and MOD), jumps taken/not-taken, a full loop program,
+  label resolution (including an undefined-label and an end-of-program
+  edge case), CALL/RET (a subroutine called twice, RET-without-CALL,
+  call-stack overflow), and a 20,000-case deterministic fuzz test.
 
 ## Example
 
@@ -101,6 +119,10 @@ STACK:
 
 $ ./vm examples/sum-loop.bytecode   # sums 5+4+3+2+1 via LOAD/STORE/JUMP
 15
+
+$ ./vm examples/call-ret.bytecode   # CALL/RET a "double" subroutine twice
+42
+200
 ```
 
 ## Experiments
@@ -122,27 +144,44 @@ Benchmark: raw VM throughput (countdown loop, no trace)
 (each row averaged over enough repeats to exceed 50ms total)
 
 iterations    reps    ms/run      iterations/sec
-100000        26      1.9231      52000000
-1000000       4       12.7500     78431373
-5000000       1       83.0000     60240964
+100000        26      1.9778      50561033
+1000000       3       18.6503     53618345
+5000000       1       75.2000     66489362
 
 Benchmark: --trace overhead at 100000 iterations
 (output redirected to a file, not the terminal)
 
-no trace:   1.9231 ms/run (26 reps)
-trace:    668.0000 ms/run (1 reps)  -> 347.4x slower
+no trace:   1.9778 ms/run (26 reps)
+trace:    179.6630 ms/run (1 reps)  -> 90.8x slower
+
+Benchmark: CALL/RET overhead, at 100000 iterations
+(identical loop, with vs. without one CALL+RET pair per iteration)
+
+no call:     1.9778 ms/run (26 reps)
+with call:   2.1206 ms/run (24 reps)  -> 1.07x slower, ~1.4ns added per CALL+RET pair
 ```
 
 ## Results
 
-Raw throughput lands around 50-80 million VM instructions per second
+Raw throughput lands around 50-65 million VM instructions per second
 regardless of scale — a `switch`-dispatched loop over a simple stack
-is genuinely fast. `--trace` is over **300x slower** at the same
-iteration count: each traced instruction does 1-2 `fprintf` calls
-(formatting plus a syscall-backed write), and that I/O cost dwarfs the
-actual arithmetic being traced. This is a direct, measured illustration
-of why production interpreters never leave tracing/logging on by
-default in hot loops.
+is genuinely fast. `--trace` is tens of times slower at the same
+iteration count (90.8x this run; a from-scratch fixed-seed-free
+wall-clock benchmark's exact multiplier varies run to run with system
+noise, see `docs/reproducibility.md` -- it has been measured as high as
+347x in an earlier run of this same benchmark): each traced instruction
+does 1-2 `fprintf` calls (formatting plus a syscall-backed write), and
+that I/O cost dwarfs the actual arithmetic being traced. This is a
+direct, measured illustration of why production interpreters never
+leave tracing/logging on by default in hot loops.
+
+**CALL/RET's own overhead is small — about 1.4ns per pair,** a ~7%
+slowdown on this loop. That's cheap by design: `CALL` is one bounds
+check plus one array write (the return address) plus a `pc` reassignment;
+`RET` is a bounds check plus one array read. Neither touches the data
+stack at all, and neither does anything as comparatively expensive as
+`JUMP_IF_FALSE`'s stack pop or `PRINT`'s `fprintf` call -- the
+measurement matches that design directly rather than surprising it.
 
 ## What I learned
 
@@ -152,23 +191,25 @@ turned out to matter for more than flexibility — it's what made the
 terminal with hundreds of thousands of lines or silently measuring
 disk I/O speed instead of interpreter speed.
 
+Adding MOD and the 6 comparison opcodes (needed before
+`compilers/tiny-language` could compile a single `if`/`while` condition
+to this ISA at all -- see that lab's own Experiments section) was a
+reminder that "the VM works" and "the VM is a usable compilation
+target" are different claims: every hand-written `.bytecode` example
+in this repo got by without a single comparison, so the gap was
+invisible until a real higher-level language actually tried to target
+this ISA.
+
 ## Limitations
 
-- No labels/symbolic jump targets — every jump is a raw instruction
-  index, which makes hand-writing loops error-prone (see the index
-  comments in `examples/sum-loop.bytecode`). A real assembler would
-  resolve labels in a first pass.
 - 256 memory slots, no named variables — this is closer to raw
   machine registers/memory than to a real language's variables.
-- No function calls (`CALL`/`RET`), so no recursion or subroutines.
+- No local variables per call frame — `CALL`/`RET` share the same 256
+  global memory slots as everything else; a recursive subroutine using
+  those slots for its own state would clobber its own earlier
+  invocation's values (no stack frames, only a return-address stack).
+- No parameter-passing convention beyond ordinary memory slots: a
+  caller `STORE`s arguments before `CALL`, a callee `LOAD`s them after
+  — there's no register-passing or automatic stack-based argument area.
 - Educational implementation: no bytecode serialization format, no
   optimizations (constant folding, etc).
-
-## Further experiments
-
-- Add a first-pass label resolver to the assembler so loops don't
-  need manually counted instruction indices.
-- Compile `compilers/tiny-language`'s AST down to this VM's bytecode
-  instead of tree-walking it, and compare execution speed.
-- Add `CALL`/`RET` opcodes and a call stack, then measure the added
-  per-call overhead.

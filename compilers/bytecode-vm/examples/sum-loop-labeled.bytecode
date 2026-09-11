@@ -1,0 +1,24 @@
+# Same program as sum-loop.bytecode (sums 5+4+3+2+1 = 15), but using
+# labels instead of hand-counted raw indices -- compare the two files.
+# A label is a bare identifier + ':' alone on its own line; it doesn't
+# emit an instruction, it just names the index of whatever comes next.
+PUSH 5
+STORE 0
+PUSH 0
+STORE 1
+loop_start:
+LOAD 0
+JUMP_IF_FALSE loop_end
+LOAD 1
+LOAD 0
+ADD
+STORE 1
+LOAD 0
+PUSH 1
+SUB
+STORE 0
+JUMP loop_start
+loop_end:
+LOAD 1
+PRINT
+HALT
