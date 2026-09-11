@@ -49,5 +49,41 @@ int main() {
                    << std::setw(14) << std::fixed << std::setprecision(3) << bfs_ms
                    << std::setw(14) << dij_ms << "\n";
     }
+
+    std::cout << "\nBenchmark: does graph *density* (not just size) widen the BFS/Dijkstra gap?\n";
+    std::cout << "(fixed V=2000, src=0, dst=V-1, average out-degree varies)\n\n";
+    std::cout << std::left << std::setw(10) << "avg_deg" << std::setw(12) << "E" << std::setw(14) << "BFS (ms)"
+               << std::setw(14) << "Dijkstra (ms)" << std::setw(10) << "ratio" << "\n";
+    for (int avg_degree : {2, 4, 8, 16, 32}) {
+        const int n = 2000;
+        Graph g = random_graph(n, avg_degree, /*seed=*/42);
+        long long edges = 0;
+        for (auto& e : g.adj) edges += (long long)e.size();
+
+        double bfs_ms = time_ms([&] { bfs_shortest_path(g, 0, n - 1); });
+        double dij_ms = time_ms([&] { dijkstra_shortest_path(g, 0, n - 1); });
+        double ratio = bfs_ms > 0.0 ? dij_ms / bfs_ms : 0.0;
+
+        std::cout << std::left << std::setw(10) << avg_degree << std::setw(12) << edges << std::setw(14)
+                   << std::fixed << std::setprecision(3) << bfs_ms << std::setw(14) << dij_ms << std::setw(10)
+                   << std::setprecision(1) << ratio << "\n";
+    }
+
+    std::cout << "\nBenchmark: Dijkstra vs Bellman-Ford runtime by graph size\n";
+    std::cout << "(same random graphs as the first table -- both non-negative, so both give\n";
+    std::cout << " the same answer; this measures O((V+E)logV) vs O(V*E) directly)\n\n";
+    std::cout << std::left << std::setw(10) << "V" << std::setw(12) << "E" << std::setw(16) << "Dijkstra (ms)"
+               << std::setw(18) << "Bellman-Ford (ms)" << "\n";
+    for (int n : {100, 1000, 5000, 10000}) {
+        Graph g = random_graph(n, 4, /*seed=*/42);
+        long long edges = 0;
+        for (auto& e : g.adj) edges += (long long)e.size();
+
+        double dij_ms = time_ms([&] { dijkstra_shortest_path(g, 0, n - 1); });
+        double bf_ms = time_ms([&] { bellman_ford_shortest_path(g, 0, n - 1); });
+
+        std::cout << std::left << std::setw(10) << n << std::setw(12) << edges << std::setw(16) << std::fixed
+                   << std::setprecision(3) << dij_ms << std::setw(18) << bf_ms << "\n";
+    }
     return 0;
 }

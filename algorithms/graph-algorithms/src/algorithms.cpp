@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <queue>
+#include <stdexcept>
 
 namespace {
 // Rebuild src->dst path from a parent array. -2 = unvisited, -1 = is src.
@@ -63,10 +64,15 @@ std::vector<int> dfs_preorder(const Graph& g, int src) {
     return order;
 }
 
-bool dfs_has_cycle(const Graph& g) {
+bool dfs_has_cycle(const Graph& g) { return dfs_find_cycle(g).has_value(); }
+
+std::optional<std::vector<int>> dfs_find_cycle(const Graph& g) {
     // 0 = white (unvisited), 1 = gray (on current DFS stack), 2 = black (done).
-    // A back edge to a gray vertex means a cycle.
+    // A back edge to a gray vertex means a cycle; `parent` lets us walk
+    // back up from that edge to reconstruct the actual cycle, not just
+    // report that one exists.
     std::vector<int> color(g.n, 0);
+    std::vector<int> parent(g.n, -1);
 
     // Iterative DFS with explicit call-frame simulation so this works on
     // graphs too deep for the real call stack, and so we can tell "enter
@@ -84,9 +90,20 @@ bool dfs_has_cycle(const Graph& g) {
             Frame& f = stack.back();
             if (f.edge_index < g.adj[f.node].size()) {
                 int v = g.adj[f.node][f.edge_index++].first;
-                if (color[v] == 1) return true; // back edge -> cycle
+                if (color[v] == 1) {
+                    // Back edge f.node -> v: walk parent pointers from
+                    // f.node up to v, then reverse to get v -> ... -> f.node,
+                    // and close the loop back to v.
+                    std::vector<int> cycle;
+                    for (int at = f.node; at != v; at = parent[at]) cycle.push_back(at);
+                    cycle.push_back(v);
+                    std::reverse(cycle.begin(), cycle.end());
+                    cycle.push_back(v);
+                    return cycle;
+                }
                 if (color[v] == 0) {
                     color[v] = 1;
+                    parent[v] = f.node;
                     stack.push_back({v, 0});
                 }
             } else {
@@ -95,7 +112,7 @@ bool dfs_has_cycle(const Graph& g) {
             }
         }
     }
-    return false;
+    return std::nullopt;
 }
 
 PathResult dijkstra_shortest_path(const Graph& g, int src, int dst) {
@@ -125,6 +142,53 @@ PathResult dijkstra_shortest_path(const Graph& g, int src, int dst) {
                 parent[v] = u;
                 pq.push({nd, v});
             }
+        }
+    }
+
+    PathResult r;
+    r.reachable = dist[dst] != INF;
+    if (r.reachable) {
+        r.distance = dist[dst];
+        r.path = reconstruct(parent, src, dst);
+    }
+    return r;
+}
+
+PathResult bellman_ford_shortest_path(const Graph& g, int src, int dst) {
+    const long long INF = 1LL << 60;
+    std::vector<long long> dist(g.n, INF);
+    std::vector<int> parent(g.n, -2);
+    dist[src] = 0;
+    parent[src] = -1;
+
+    struct Edge {
+        int u, v, w;
+    };
+    std::vector<Edge> edges;
+    for (int u = 0; u < g.n; u++)
+        for (auto [v, w] : g.adj[u]) edges.push_back({u, v, w});
+
+    // Relax every edge up to V-1 times -- the longest a shortest path
+    // (with no cycles, since a negative one would make it undefined and
+    // a non-negative one is never worth repeating) can be is V-1 edges.
+    for (int i = 0; i < g.n - 1; i++) {
+        bool changed = false;
+        for (const auto& e : edges) {
+            if (dist[e.u] == INF) continue;
+            if (dist[e.u] + e.w < dist[e.v]) {
+                dist[e.v] = dist[e.u] + e.w;
+                parent[e.v] = e.u;
+                changed = true;
+            }
+        }
+        if (!changed) break; // converged early
+    }
+
+    // A V-th pass that can still relax an edge means a negative-weight
+    // cycle is reachable from src -- "shortest path" has no answer.
+    for (const auto& e : edges) {
+        if (dist[e.u] != INF && dist[e.u] + e.w < dist[e.v]) {
+            throw std::runtime_error("negative-weight cycle detected, no shortest path exists");
         }
     }
 
