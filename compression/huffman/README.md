@@ -90,15 +90,57 @@ Real output from `make benchmark`:
 
 ```text
 dataset        original     compressed      ratio encode(ms) decode(ms)
-english            1257            959     76.29%      0.000      0.000
-repetitive         6400           1068     16.69%      0.000      0.000
-source_code        1450           1124     77.52%      0.000      0.000
-random             6400           6665    104.14%      0.000      0.000
+english            1257            959     76.29%      0.016      0.023
+repetitive         6400           1068     16.69%      0.030      0.019
+source_code        1450           1124     77.52%      0.018      0.019
+random             6400           6665    104.14%      0.192      0.097
 ```
 
-(Encode/decode times round to 0.000 ms at this file size — `clock()`'s
-resolution is too coarse to resolve sub-100-microsecond work here; the
-ratio numbers are the meaningful result at this scale.)
+**Does the header disappear into the noise on a much larger English
+corpus?** Same `examples/english.txt` text, repeated in memory to 10x/
+100x/1000x its size (the frequency distribution stays representative
+of real English either way — it's the same underlying text):
+
+```text
+size                 original     compressed      ratio
+1x (baseline)            1257            959     76.29%
+10x                     12570           7175     57.08%
+100x                   125700          69331     55.16%
+1000x                 1257000         690893     54.96%
+```
+
+**Ratio vs. file size, same repetitive pattern** (`"AAAAAAAAB"` repeated
+to each size — where does the fixed header stop mattering?):
+
+```text
+size                 original     compressed      ratio
+100 bytes                 100            281    281.00%
+1000 bytes               1000            393     39.30%
+10000 bytes             10000           1518     15.18%
+100000 bytes           100000          12768     12.77%
+1000000 bytes         1000000         125268     12.53%
+```
+
+**Chaining LZ77 before Huffman, like DEFLATE does** (manual measurement
+via `compression/lz77`'s and this lab's own CLIs on the same
+`examples/repetitive.txt`, and on a 320,000-byte version of it —
+50 copies concatenated — to see whether scale changes the answer):
+
+```text
+6,400-byte repetitive.txt:
+  Huffman alone:        1,068 bytes (16.69%)
+  LZ77 alone:              112 bytes (1.75%)
+  LZ77 -> Huffman:         312 bytes (278.57% of the 112-byte LZ77 output)
+  -> chaining HURTS here: Huffman's 268-byte header alone is more than
+     double the entire LZ77 output it's compressing.
+
+320,000-byte repetitive.txt (50 copies):
+  Huffman alone:        40,268 bytes (12.58%)
+  LZ77 alone:            5,012 bytes (1.57%)
+  LZ77 -> Huffman:        1,690 bytes (33.72% of the 5,012-byte LZ77 output)
+  -> chaining HELPS a lot here: final size is ~3x smaller than LZ77
+     alone, ~24x smaller than Huffman alone.
+```
 
 ## Results
 
@@ -107,15 +149,37 @@ dominates the frequency table, earning it a very short code. English
 text and source code land around 76-78% — real compression, but the
 268-byte fixed header is a large fraction of these small (~1-1.5 KB)
 files, so the ratio understates what Huffman achieves on the *content*
-alone (on a multi-megabyte English corpus the header becomes
-negligible and the ratio approaches the theoretical ~55-60% for
-English). Random data is the standout: it comes out **larger** than the
+alone. Random data is the standout: it comes out **larger** than the
 input (104%) — with no skew in the byte-frequency distribution, every
 symbol needs close to a full 8 bits, so the near-8-bit codes plus the
 268-byte header can't help but add overhead. This is the concrete
 demonstration of Shannon entropy: Huffman coding approaches the
 entropy of the source, and uniformly random bytes have the maximum
 possible entropy (8 bits/byte) — there is nothing left to compress.
+
+**The larger-corpus and ratio-vs-size experiments confirm the header
+theory directly, on two different datasets.** English text's ratio
+drops from 76.29% at 1x to 54.96% at 1000x, converging toward the
+theoretical ~55% for English (source: standard information-theory
+estimates of English entropy) as the fixed 268-byte header becomes
+negligible against the growing content. The repetitive pattern shows
+the same convergence even more sharply — 281% (grows!) at 100 bytes,
+down to 12.53% at 1,000,000 bytes — because at 100 bytes the header
+*is* almost the entire output.
+
+**Chaining LZ77 before Huffman is a genuine two-sided result, not a
+clean "chaining is better."** At small scale it actively hurts (312
+bytes vs. 112 for LZ77 alone) for exactly the header-overhead reason
+above: Huffman's fixed 268-byte cost dwarfs a 112-byte input regardless
+of any further redundancy. At larger scale it wins decisively (1,690
+bytes vs. 5,012 for LZ77 alone) because the LZ77 token stream itself
+still has real byte-frequency skew Huffman can exploit, and by then the
+header is a small fraction of a 5KB+ intermediate stream. This is
+exactly why real DEFLATE always follows LZ77 with Huffman coding on
+real-world-sized data — the combination beats either alone once inputs
+are large enough for the fixed cost to amortize, but "always chain
+them" isn't universally true at every size, which a single data point
+wouldn't have shown.
 
 ## What I learned
 
@@ -137,11 +201,3 @@ worse than the algorithm's real per-symbol efficiency.
   files, not optimized for very large files (whole file loaded into
   memory at once).
 
-## Further experiments
-
-- Measure the ratio on a much larger English corpus to see the header
-  overhead disappear into the noise.
-- Chain LZ77 before Huffman (like DEFLATE does) and compare the ratio
-  to Huffman alone on the same repetitive dataset.
-- Plot ratio vs. file size for the same repetitive pattern to find where
-  the header stops mattering.

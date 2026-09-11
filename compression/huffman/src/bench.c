@@ -2,6 +2,7 @@
 // data not?
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #include "huffman.h"
@@ -73,6 +74,18 @@ static void bench_one(const char *label, const char *path) {
     free(decompressed);
 }
 
+// Compresses `data` directly (no file I/O) and reports the ratio --
+// used by the two experiments below, which build their inputs in
+// memory rather than reading example files.
+static void bench_ratio_only(const char *label, const uint8_t *data, size_t len) {
+    uint8_t *compressed = NULL;
+    size_t compressed_len = 0;
+    huffman_compress_buffer(data, len, &compressed, &compressed_len);
+    double ratio = len > 0 ? 100.0 * (double)compressed_len / (double)len : 0.0;
+    printf("%-16s %12lu %14lu %9.2f%%\n", label, (unsigned long)len, (unsigned long)compressed_len, ratio);
+    free(compressed);
+}
+
 int main(void) {
     printf("Benchmark: compression ratio by data type\n\n");
     printf("%-12s %10s %14s %10s %10s %10s\n", "dataset", "original", "compressed", "ratio", "encode(ms)", "decode(ms)");
@@ -80,5 +93,50 @@ int main(void) {
     bench_one("repetitive", "examples/repetitive.txt");
     bench_one("source_code", "examples/source.c");
     bench_one("random", "examples/random.bin");
+
+    // --- Does the 268-byte header disappear into the noise on a much
+    // larger English corpus? Built by repeating examples/english.txt in
+    // memory (no new example file to keep in the repo) -- the frequency
+    // distribution stays representative of real English either way,
+    // since it's the same underlying text, just repeated.
+    printf("\nBenchmark: does header overhead disappear on a larger English corpus?\n\n");
+    printf("%-16s %12s %14s %10s\n", "size", "original", "compressed", "ratio");
+    {
+        uint8_t *english;
+        size_t english_len;
+        if (read_whole_file("examples/english.txt", &english, &english_len) == 0) {
+            bench_ratio_only("1x (baseline)", english, english_len);
+            int multipliers[] = {10, 100, 1000};
+            for (size_t m = 0; m < sizeof(multipliers) / sizeof(multipliers[0]); m++) {
+                size_t big_len = english_len * (size_t)multipliers[m];
+                uint8_t *big = malloc(big_len);
+                for (int r = 0; r < multipliers[m]; r++) memcpy(big + (size_t)r * english_len, english, english_len);
+                char label[32];
+                snprintf(label, sizeof(label), "%dx", multipliers[m]);
+                bench_ratio_only(label, big, big_len);
+                free(big);
+            }
+            free(english);
+        }
+    }
+
+    // --- Ratio vs. file size for the same repetitive pattern -- where
+    // does the fixed header stop mattering?
+    printf("\nBenchmark: ratio vs. file size, same repetitive pattern (\"AAAAAAAAB\" repeated)\n\n");
+    printf("%-16s %12s %14s %10s\n", "size", "original", "compressed", "ratio");
+    {
+        size_t sizes[] = {100, 1000, 10000, 100000, 1000000};
+        for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++) {
+            size_t len = sizes[s];
+            uint8_t *data = malloc(len);
+            static const char pattern[] = "AAAAAAAAB";
+            for (size_t i = 0; i < len; i++) data[i] = (uint8_t)pattern[i % (sizeof(pattern) - 1)];
+            char label[32];
+            snprintf(label, sizeof(label), "%lu bytes", (unsigned long)len);
+            bench_ratio_only(label, data, len);
+            free(data);
+        }
+    }
+
     return 0;
 }
