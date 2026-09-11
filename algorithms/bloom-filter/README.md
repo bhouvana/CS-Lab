@@ -10,6 +10,9 @@ prediction.
 ```bash
 cargo run --bin bloom -- demo         # tiny insert/contains walkthrough
 cargo run --bin bloom -- experiment   # false-positive-rate table
+cargo run --bin bloom -- counting     # CountingBloomFilter memory cost + real deletion
+cargo run --bin bloom -- hashers      # FNV-1a+mix64 vs. SipHash (DefaultHasher)
+cargo run --bin bloom -- ksweep       # false-positive rate vs. k, empirical optimum
 cargo run --example basic             # optimal-parameter sizing example
 ```
 
@@ -48,15 +51,29 @@ items' overlapping hash positions).
 - The bit array is packed into `Vec<u64>` (one bit per slot, 64 per word),
   not `Vec<bool>`, so a 100,000-item filter takes kilobytes, not a byte
   per bit.
+- `CountingBloomFilter` trades that packing away on purpose: a `Vec<u8>`
+  saturating counter per slot instead of a bit, so `remove()` can
+  decrement instead of just being unable to un-set a bit another item
+  might also depend on. 8x the memory of `BloomFilter` for the same
+  `m` (measured below), to buy the one thing a plain Bloom filter
+  structurally cannot do.
 
 ## Implementation
 
-- `src/lib.rs` — `BloomFilter` (insert/contains/optimal_params) plus the
-  experiment helpers (`theoretical_fp_rate`, `measure_fp_rate`).
-- `src/main.rs` — CLI (`demo` / `experiment`).
+- `src/lib.rs` — `BloomFilter` and `CountingBloomFilter`
+  (insert/contains/optimal_params) plus the experiment helpers
+  (`theoretical_fp_rate`, `measure_fp_rate`, `compare_hashers`,
+  `sweep_k`). Both filter types share one hash-index derivation
+  (`fnv_hash_indices`) — they only differ in what they store at each
+  index, a bit vs. a saturating counter.
+- `src/main.rs` — CLI (`demo` / `experiment` / `counting` / `hashers` /
+  `ksweep`).
 - `examples/basic.rs` — sizing a filter via `with_optimal_params`.
-- `tests/tests.rs` — no false negatives, empty-filter edge case, invalid
-  params (`num_bits`/`num_hashes` = 0), false-positive-rate regression.
+- `tests/tests.rs` — 11 tests: no false negatives, empty-filter edge
+  case, invalid params (`num_bits`/`num_hashes` = 0), the false-
+  positive-rate regression, `CountingBloomFilter`'s no-false-negatives/
+  remove/8x-memory/invalid-params cases, and a hasher-comparison and
+  k-sweep regression each.
 
 ## Example
 
@@ -110,6 +127,79 @@ Going from 4 to 12 bits per item drops the false-positive rate roughly
 filter space/accuracy trade-off, and it holds steady regardless of `n`,
 confirming the filter scales by bits-per-item, not by absolute size.
 
+**Counting Bloom filter — memory cost and real deletion.** Real output
+from `cargo run --release --bin bloom -- counting`:
+
+```text
+m = 9586 bits, k = 7
+BloomFilter memory:            1200 bytes (packed bits)
+CountingBloomFilter memory:    9586 bytes (1-byte counter per slot, 8.0x more)
+
+Deletion, which a plain BloomFilter cannot do at all:
+before remove: apple=true, banana=true, cherry=true
+after removing banana: apple=true, banana=false, cherry=true
+```
+
+Essentially exactly 8x, as one-bit-vs-one-byte storage predicts:
+`CountingBloomFilter` uses `m` bytes exactly (9586), `BloomFilter` uses
+`ceil(m/64) * 8` bytes (1200) — rounded up to the next 64-bit word,
+which is why `1200 * 8 = 9600` rather than 9586 on the nose; the ratio
+(9586/1200 = 7.988) lands a hair under 8x because of that rounding, not
+because of anything wrong. Deletion works: the targeted item goes
+absent, the untouched ones stay present.
+
+**FNV-1a+mix64 vs. SipHash (`DefaultHasher`).** Real output from
+`cargo run --release --bin bloom -- hashers`:
+
+```text
+n         m         k     fnv fp-rate     fnv time      siphash fp-rate   siphash time
+10000     80000     6     0.02300         3.7406ms      0.02060           4.4247ms
+100000    800000    6     0.02153         48.6964ms     0.02071           50.9981ms
+```
+
+Both hashers land close to the theoretical 0.02158 either way — neither
+has a hidden weakness like plain FNV-1a did. SipHash is *not* faster
+here; it's consistently ~10-20% slower at both scales, which makes
+sense once you remember what it's actually for: SipHash is designed to
+resist deliberately-crafted hash-flooding inputs (a security property),
+which costs extra mixing rounds this lab's threat model (random
+item names, not an adversary choosing them) doesn't need. For this
+use case, the from-scratch FNV-1a+mix64 wins on speed for equivalent
+quality — a concrete example of "use the hasher your threat model
+actually requires," not "the fancier-sounding one is always better."
+
+**False-positive rate vs. `k`, at fixed `m` and `n`.** Real output from
+`cargo run --release --bin bloom -- ksweep`:
+
+```text
+n = 10000, m = 80000 (formula predicts optimal k = 6)
+
+k     measured      theoretical
+1     0.11710       0.11750
+2     0.05080       0.04893
+3     0.03330       0.03058
+4     0.02490       0.02397
+5     0.02220       0.02168
+6     0.02300       0.02158
+7     0.02200       0.02293
+8     0.02400       0.02549
+9     0.03190       0.02922
+10    0.03340       0.03419
+11    0.03880       0.04051
+12    0.04750       0.04833
+
+empirical optimum: k = 7 (measured rate 0.02200)
+```
+
+The measured curve tracks the theoretical U-shape almost exactly —
+both bottom out in the k=5-7 range, both climb steeply on either side.
+The empirical minimum landed at k=7 rather than the formula's k=6, a
+one-step difference well within the sampling noise already visible
+elsewhere in this table (k=5's measured rate is *below* its own
+theoretical value, which k=6 isn't) — not evidence the formula is
+wrong, just that measuring a rate around 2% from 10,000 trials has
+real variance.
+
 ## What I learned
 
 The double-hashing trick (deriving `k` hash positions from just 2 base
@@ -117,21 +207,20 @@ hashes) only works if those 2 base hashes actually have good avalanche —
 FNV-1a's known low-bit weakness was invisible in `insert`/`contains`
 correctness tests but showed up immediately as a 3.5x inflated
 false-positive rate once measured against theory. A property this subtle
-needed a *quantitative* test, not just a functional one.
+needed a *quantitative* test, not just a functional one. The hasher
+comparison reinforced the same lesson from a different angle: SipHash
+being the "more serious" cryptographic hash didn't make it a better fit
+here — it made it slower for no measurable accuracy gain, because this
+lab's workload doesn't have the adversarial-input threat model SipHash
+is actually solving for.
 
 ## Limitations
 
 - Not thread-safe, no concurrent insert support.
-- No deletion (a standard Bloom filter cannot support removal without a
-  counting variant, which isn't implemented here).
+- `CountingBloomFilter::remove` cannot detect "this item was never
+  inserted" or "this item was already removed" — decrementing shared
+  counters below their true count can make a still-present item start
+  reporting absent, the one false-negative case a plain `BloomFilter`
+  structurally cannot produce.
 - `optimal_params` assumes the item count is known in advance; no
   resizing strategy for growing far past that estimate.
-
-## Further experiments
-
-- Implement a Counting Bloom Filter and measure the memory/deletion
-  trade-off.
-- Compare FNV-1a+mix64 against `std::collections::hash_map::DefaultHasher`
-  (SipHash) for false-positive rate and speed.
-- Plot false-positive rate vs. `k` for a fixed `m` and `n` to find the
-  empirical optimum and compare it to `k = (m/n) ln 2`.
