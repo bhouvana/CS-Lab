@@ -1,0 +1,18 @@
+LZ77 is a dictionary-based compression scheme published by Abraham
+Lempel and Jacob Ziv in 1977. Instead of assigning shorter codes to
+frequent symbols the way Huffman coding does, LZ77 looks backward
+through a sliding window of recently seen data for the longest match
+to the text about to be encoded, and replaces that repeated text with
+a short reference to where it already occurred: an offset, a length,
+and the literal symbol that follows the match. Highly repetitive data
+compresses very well this way, since long repeated runs collapse into
+a single small reference no matter how long the run actually is. Text
+without much repetition compresses far less predictably, because every
+literal symbol that cannot be matched still has to be represented
+somehow, and a naive fixed-width token format pays a fixed overhead
+per token regardless of whether that token found a real match. This is
+exactly why real compressors such as DEFLATE never use LZ77 alone: the
+raw stream of offsets, lengths, and literals is itself highly skewed
+and compressible, so a second pass of entropy coding on top of the
+LZ77 output is what turns the dictionary matching into an actual
+space saving in the general case.

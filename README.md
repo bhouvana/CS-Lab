@@ -92,20 +92,25 @@ cs-lab/
 | SAT Solver | C++ | Constraint solving / NP-completeness | done |
 | Tiny Language | Rust | Compilers | done |
 | Bytecode VM | C | Runtime systems | done |
-| LZ77 | C++ | Dictionary compression | planned |
+| LZ77 | C++ | Dictionary compression | done |
 | SHA-256 | C | Cryptography | done |
 | Cache Simulator | C++ | Computer architecture / locality | done |
 | Branch Predictor | C++ | CPU architecture | done |
 | Pipeline Simulator | Python | CPU pipelines / hazards | done |
 | Allocator | C | Memory management | done |
 | Garbage Collector | C | Runtime systems | done |
-| Tiny LSM | Rust | Storage systems | planned |
-| TCP Chat | C | Networking | planned |
-| Raft Simulator | Rust | Distributed systems | planned |
-| Constant-Time Compare | C | Side channels | planned |
+| Tiny LSM | Rust | Storage systems | done |
+| TCP Chat | C | Networking | done (Linux) |
+| Raft Simulator | Rust | Distributed systems | done |
+| Constant-Time Compare | C | Side channels | done |
 | Calling Convention | C/ASM | Machine-level programming | done (Linux) |
 | Stack Frames | C/ASM | Runtime/ABI | done (Linux) |
 | Syscall Lab | C/ASM | Operating systems | done (Linux) |
+
+All 20 labs from the project directive are implemented, tested, and
+have at least one real, measured experiment. See
+[docs/experiments.md](docs/experiments.md) for every lab's results in
+one place.
 
 See [docs/learning-path.md](docs/learning-path.md) for a suggested order.
 
@@ -120,13 +125,16 @@ make clean       # remove build artifacts
 
 Each lab also builds and tests standalone from its own directory (`make` / `cargo test`).
 
-The three `assembly/*` labs are Linux x86-64 only — their Makefiles
+The three `assembly/*` labs and `networking/tcp-chat` are Linux
+(x86-64 for the assembly labs specifically) only — their Makefiles
 detect the platform and print a `skip:` line instead of building (not
-an error) on anything else, because the hand-written assembly assumes
-Linux-specific conventions (the System V calling convention, real
-Linux syscall numbers) that would produce wrong results or undefined
-behavior, not a clean build failure, under a different ABI. They were
-built and verified on real Linux (WSL Ubuntu) during development.
+an error) on anything else. For the assembly labs this isn't a
+portability nicety: the hand-written code assumes Linux-specific
+conventions (the System V calling convention, real Linux syscall
+numbers) that would produce wrong results or undefined behavior, not a
+clean build failure, under a different ABI. `tcp-chat` needs POSIX
+sockets. All four were built and verified on real Linux (WSL Ubuntu)
+during development.
 
 ## What CS-Lab lets you see
 

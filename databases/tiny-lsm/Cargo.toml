@@ -1,0 +1,13 @@
+[package]
+name = "tiny-lsm"
+version = "0.1.0"
+edition = "2021"
+description = "A miniature log-structured storage engine: WAL -> memtable -> flush -> SSTable -> compaction."
+
+[[bin]]
+name = "lsm"
+path = "src/main.rs"
+
+[lib]
+name = "tiny_lsm"
+path = "src/lib.rs"

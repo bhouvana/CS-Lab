@@ -1,0 +1,13 @@
+[package]
+name = "raft-simulator"
+version = "0.1.0"
+edition = "2021"
+description = "A deterministic, single-process Raft consensus simulator: leader election, heartbeats, basic log replication."
+
+[[bin]]
+name = "raft"
+path = "src/main.rs"
+
+[lib]
+name = "raft_simulator"
+path = "src/lib.rs"
