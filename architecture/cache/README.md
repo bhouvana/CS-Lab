@@ -61,7 +61,7 @@ number of sets changes.
 - `include/parse_size.hpp` / `src/parse_size.cpp` — `"32KB"` -> `32768`.
 - `src/main.cpp` — CLI, trace file loader (hex or decimal, one address
   per line).
-- `src/bench.cpp` — the two experiments below.
+- `src/bench.cpp` — the four experiments below.
 - `tests/test_cache.cpp` — 9 tests: hit, miss, conflict miss, LRU
   eviction order, the exact trace from the project directive, and
   invalid-config rejection.
@@ -129,6 +129,27 @@ size        hit rate
 8KB         99.50%
 ```
 
+**3. Replacement policy on a workload trace.** The benchmark records
+row-major and column-major scans of a 64x64 integer matrix, then replays
+the 8192 addresses through a 4-way 4KB cache.
+
+```text
+policy      hit rate
+LRU         46.88%
+FIFO        46.88%
+random      54.74%
+```
+
+**4. Two-level hierarchy.** The same trace runs through a 1KB 4-way L1
+and a 16KB 8-way L2. The reported AMAT uses 1 cycle for an L1 hit, 10
+cycles for an L2 hit after an L1 miss, and 100 cycles for memory.
+
+```text
+L1 hit rate: 46.88%
+L2 hit rate (on L1 misses): 94.12%
+AMAT: 8.91 cycles
+```
+
 ## Results
 
 Both experiments show a **sharp cliff, not a gradual curve** — and
@@ -142,6 +163,15 @@ misses out of 1600 total accesses). Experiment 2 shows the identical
 phenomenon from the size side: below 4KB the 64-line working set
 doesn't fit and a sequential scan gets zero reuse; at 4KB and above it
 fits completely and hit rate jumps to the same 99.5%.
+The matrix trace is less binary: LRU and FIFO both reach 46.88%, while
+the deterministic random policy reaches 54.74% for this particular
+scan. The result is workload-specific, but it demonstrates why policy
+comparisons need a trace rather than a single conflict pattern.
+
+The two-level model turns the 46.88% L1 hit rate into an effective
+8.91-cycle access by servicing 94.12% of L1 misses in L2 instead of
+going to 100-cycle memory. This is AMAT for the chosen costs, not a
+claim about any particular CPU.
 
 ## What I learned
 
@@ -157,21 +187,11 @@ a bug.
 
 ## Limitations
 
-- Only LRU is implemented (no FIFO, random, or LFU replacement to
-  compare against).
+- The production `Cache` class implements LRU only; FIFO, random, and
+  the two-level calculation exist in `src/bench.cpp` as experiments.
 - Address decomposition uses division/modulo, not bit-slicing, so set
   counts need not be a power of two — a simplification real hardware
   doesn't have (real caches require power-of-two sets for cheap
   bit-masking).
-- Single-level cache only — no modeling of L1/L2/L3 hierarchies or
-  write policies (write-through vs. write-back, write-allocate).
-
-## Further experiments
-
-- Feed a real memory access trace (e.g. from `valgrind --tool=lcallgrind`
-  or a simple instrumented program) instead of synthetic patterns, and
-  see whether real code shows the same sharp cliffs or smoother curves.
-- Add FIFO and random replacement and compare hit rates against LRU on
-  the same traces.
-- Model a two-level (L1+L2) hierarchy and measure the effective average
-  memory access time, not just hit rate.
+- No write policies (write-through vs. write-back, write-allocate) are
+  modeled.
