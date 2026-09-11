@@ -123,7 +123,12 @@ void sha256_update(SHA256_CTX *ctx, const uint8_t *data, size_t len) {
     }
 }
 
-void sha256_final(SHA256_CTX *ctx, uint8_t digest[32]) {
+// Shared by sha256_final/sha224_final: pad, process the final block(s),
+// then copy out `num_words` 32-bit state words. SHA-224 and SHA-256 are
+// the identical algorithm up to this point -- they differ only in the
+// initial hash value (sha224_init vs sha256_init) and in how much of
+// the final state they expose (7 words/28 bytes vs 8/32).
+static void finalize(SHA256_CTX *ctx, uint8_t *digest, int num_words) {
     uint64_t bit_len = ctx->bit_len; // total length of the ORIGINAL message
     size_t n = ctx->buffer_len;
 
@@ -142,12 +147,16 @@ void sha256_final(SHA256_CTX *ctx, uint8_t digest[32]) {
     for (int i = 0; i < 8; i++) ctx->buffer[56 + i] = (uint8_t)(bit_len >> (56 - 8 * i));
     process_block(ctx, ctx->buffer);
 
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < num_words; i++) {
         digest[i * 4] = (uint8_t)(ctx->state[i] >> 24);
         digest[i * 4 + 1] = (uint8_t)(ctx->state[i] >> 16);
         digest[i * 4 + 2] = (uint8_t)(ctx->state[i] >> 8);
         digest[i * 4 + 3] = (uint8_t)(ctx->state[i]);
     }
+}
+
+void sha256_final(SHA256_CTX *ctx, uint8_t digest[32]) {
+    finalize(ctx, digest, 8);
 }
 
 void sha256_hash(const uint8_t *data, size_t len, uint8_t digest[32]) {
@@ -164,4 +173,37 @@ void sha256_to_hex(const uint8_t digest[32], char hex[65]) {
         hex[i * 2 + 1] = lut[digest[i] & 0x0f];
     }
     hex[64] = '\0';
+}
+
+// SHA-224's own initial hash value (FIPS 180-4 §5.3.2) -- different from
+// SHA-256's H0, otherwise every other constant (K[]) and the whole
+// compression function are shared.
+static const uint32_t H0_224[8] = {
+    0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4,
+};
+
+void sha224_init(SHA256_CTX *ctx) {
+    memcpy(ctx->state, H0_224, sizeof(H0_224));
+    ctx->bit_len = 0;
+    ctx->buffer_len = 0;
+}
+
+void sha224_final(SHA256_CTX *ctx, uint8_t digest[28]) {
+    finalize(ctx, digest, 7); // one word (32 bits) short of SHA-256's output
+}
+
+void sha224_hash(const uint8_t *data, size_t len, uint8_t digest[28]) {
+    SHA256_CTX ctx;
+    sha224_init(&ctx);
+    sha256_update(&ctx, data, len); // update is identical to SHA-256's
+    sha224_final(&ctx, digest);
+}
+
+void sha224_to_hex(const uint8_t digest[28], char hex[57]) {
+    static const char *lut = "0123456789abcdef";
+    for (int i = 0; i < 28; i++) {
+        hex[i * 2] = lut[digest[i] >> 4];
+        hex[i * 2 + 1] = lut[digest[i] & 0x0f];
+    }
+    hex[56] = '\0';
 }

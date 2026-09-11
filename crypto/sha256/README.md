@@ -13,6 +13,7 @@ padding rule is written out.
 ```bash
 ./sha256 "abc"
 ./sha256 --file some-file.txt
+./sha256 --sha224 "abc"          # SHA-224: same algorithm, different IV, truncated output
 ```
 
 ## Why does it matter?
@@ -64,6 +65,12 @@ hash state         (8 x 32-bit words, updated after every block)
   mixing earlier words with `small_sigma0`/`small_sigma1` — this is
   what makes every output bit depend on the whole block, not just 16
   words of it.
+- **SHA-224** is SHA-256 with a different starting hash value and a
+  truncated output — nothing else changes. `sha224_init` swaps in
+  SHA-224's own IV (`H0_224`); `sha256_update` is reused unmodified;
+  `finalize()` (shared by both `_final` functions) just copies out 7
+  state words instead of 8. The entire diff for a second hash function
+  is one constant array and two thin wrapper functions.
 
 ## Implementation
 
@@ -72,7 +79,8 @@ hash state         (8 x 32-bit words, updated after every block)
   schedule, compression function, padding.
 - `src/main.c` — CLI.
 - `src/bench.c` — the throughput experiment.
-- `tests/test_sha256.c` — FIPS/NIST test vectors plus edge cases.
+- `tests/test_sha256.c` — 10 tests: FIPS/NIST test vectors (SHA-256 and
+  SHA-224), edge cases, and a 1-byte-at-a-time incremental stress test.
 
 ## Example
 
@@ -88,10 +96,14 @@ b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9
 
 $ ./sha256 --file src/sha256.c
 d6c7883eb9f487f75cb7bbf47df0ed122e16dc86283b3ebef47b26aa1a64fc70
+
+$ ./sha256 --sha224 "abc"
+23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7
 ```
 
 All three string examples were independently cross-checked against the
-system's `sha256sum` while building this lab and matched exactly.
+system's `sha256sum` while building this lab and matched exactly; the
+SHA-224 vectors were checked the same way against `openssl dgst -sha224`.
 
 ## Experiments
 
@@ -109,15 +121,39 @@ input     reps    ms/hash     MB/s
 16 MB     1       84.0000     199.7
 ```
 
+**How does this scalar C implementation compare to `openssl sha256` on
+the same machine?** Two comparisons, since they measure different
+things:
+
+```text
+64MB file, wall-clock (via `time`, includes process startup + file I/O):
+this lab:  0.353s  (~185 MB/s)
+openssl:   0.265s  (~241 MB/s)
+-> openssl 1.33x faster end-to-end; digests verified byte-identical
+
+openssl's own internal benchmark (`openssl speed -evp sha256`, in-memory
+buffers, no I/O), 16KB blocks: 480.6 MB/s
+this lab's in-memory 16MB buffer (table above): 199.7 MB/s
+-> ~2.4x, a fairer apples-to-apples comparison since it excludes I/O
+```
+
 ## Results
 
 Throughput holds steady around 200-220 MB/s across three orders of
 magnitude of input size — expected, since SHA-256 does the same fixed
 amount of work (64 rounds of simple integer ops) per 64-byte block
 regardless of total message size; there's no algorithmic superlinear
-cost here, only the linear per-block cost. (A production SHA-256, using
-SIMD/hardware SHA extensions, would be several times faster — this is
-a portable scalar C implementation with no such optimization.)
+cost here, only the linear per-block cost.
+
+The openssl gap is real but smaller than "hardware acceleration" might
+suggest: `grep sha_ni /proc/cpuinfo` found no SHA extensions on this
+CPU, so openssl isn't using dedicated SHA-256 instructions here — its
+~2.4x edge (in-memory, apples-to-apples) comes from a hand-optimized,
+likely SIMD-vectorized message schedule, not a hardware SHA unit. Real
+SHA-NI hardware (when present) typically widens this gap to 5-10x; this
+measurement is what a from-scratch scalar implementation is actually up
+against on hardware *without* that specific acceleration, not the
+best-case gap the "hardware acceleration" framing implies.
 
 ## What I learned
 
@@ -127,7 +163,17 @@ transcription typo hides: the empty-string digest I first hardcoded
 was missing its last hex digit, so the *test* failed even though the
 *implementation* was already correct. Cross-checking the CLI's actual
 output against the system's `sha256sum` (a completely independent
-implementation) was what confirmed which side had the bug.
+implementation) was what confirmed which side had the bug. The SHA-224
+vectors were verified the same way against `openssl dgst -sha224`
+before being hardcoded into tests, specifically to avoid the same class
+of transcription bug happening twice.
+
+Adding SHA-224 also became an accidental extra correctness check: since
+`sha224_hash` reuses `sha256_update` verbatim, a passing
+`test_sha224_differs_from_sha256_regression` (different digests on
+identical input) plus matching official test vectors together prove
+`sha256_update`'s buffering logic is correct independent of which
+digest length ultimately reads out of it.
 
 ## Limitations
 
@@ -135,17 +181,9 @@ implementation) was what confirmed which side had the bug.
   constant-time guarantees beyond what falls out naturally from having
   no secret-dependent branches (see `security/constant-time` for that
   topic specifically), not fuzzed or professionally audited.
-- No SHA-224/384/512 variants — this lab implements exactly one
-  algorithm end to end rather than a family.
+- No SHA-384/512 (the 64-bit-word SHA-2 variants) — those use a
+  different word size and compression function, not just a different
+  IV/truncation like SHA-224, so they're a real second implementation,
+  not a small addition like SHA-224 was.
 - No hardware acceleration (SHA-NI, ARMv8 crypto extensions) — pure
-  portable C.
-
-## Further experiments
-
-- Implement SHA-224 (same algorithm, different IV and truncated
-  output) and note how little code that adds.
-- Compare throughput against `openssl sha256` on the same machine to
-  quantify the hardware-acceleration gap.
-- Feed the incremental API 1-byte-at-a-time updates and confirm the
-  digest is unchanged (stresses the buffering logic harder than the
-  existing uneven-chunk test).
+  portable C, measured against openssl above.

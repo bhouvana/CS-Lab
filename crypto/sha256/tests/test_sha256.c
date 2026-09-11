@@ -59,6 +59,59 @@ static void test_incremental_update_matches_one_shot(void) {
     printf("ok: incremental update matches one-shot hash\n");
 }
 
+static void check224(const char *label, const uint8_t *data, size_t len, const char *expected_hex) {
+    uint8_t digest[28];
+    sha224_hash(data, len, digest);
+    char hex[57];
+    sha224_to_hex(digest, hex);
+    if (strcmp(hex, expected_hex) != 0) {
+        fprintf(stderr, "FAIL %s:\n  got      %s\n  expected %s\n", label, hex, expected_hex);
+        assert(0 && "digest mismatch");
+    }
+    printf("ok: %-24s %s\n", label, hex);
+}
+
+static void test_sha224_empty_string_official_vector(void) {
+    check224("SHA-224 empty string", (const uint8_t *)"", 0,
+             "d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f");
+}
+
+static void test_sha224_abc_official_vector(void) {
+    check224("SHA-224 \"abc\"", (const uint8_t *)"abc", 3,
+             "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7");
+}
+
+static void test_sha224_differs_from_sha256_regression(void) {
+    // Same input, same compression function, same K[] -- only the IV and
+    // truncated output differ. If sha224_init ever accidentally reused
+    // sha256_init's H0, this would start passing when it shouldn't.
+    const char *text = "the quick brown fox jumps over the lazy dog";
+    uint8_t sha256_digest[32], sha224_digest[28];
+    sha256_hash((const uint8_t *)text, strlen(text), sha256_digest);
+    sha224_hash((const uint8_t *)text, strlen(text), sha224_digest);
+    assert(memcmp(sha256_digest, sha224_digest, 28) != 0);
+    printf("ok: SHA-224 and SHA-256 produce genuinely different digests on the same input\n");
+}
+
+static void test_one_byte_at_a_time_update_regression(void) {
+    // A harder stress test than the existing uneven-chunk test: every
+    // single sha256_update() call crosses the 1-byte boundary, so the
+    // buffering logic's "not yet a full block" path runs on nearly every
+    // call instead of occasionally.
+    const char *text = "the quick brown fox jumps over the lazy dog, 1 byte at a time";
+    uint8_t one_shot[32];
+    sha256_hash((const uint8_t *)text, strlen(text), one_shot);
+
+    SHA256_CTX ctx;
+    sha256_init(&ctx);
+    for (size_t i = 0; i < strlen(text); i++) sha256_update(&ctx, (const uint8_t *)text + i, 1);
+    uint8_t incremental[32];
+    sha256_final(&ctx, incremental);
+
+    assert(memcmp(one_shot, incremental, 32) == 0);
+    printf("ok: 1-byte-at-a-time incremental update matches one-shot hash\n");
+}
+
 static void test_block_boundary_edge_case(void) {
     // Exactly 55 bytes: the 0x80 padding byte lands at index 55, still
     // fits before the length field in a single block (55+1+8=64).
@@ -85,6 +138,10 @@ int main(void) {
     test_hello_world();
     test_448_bit_nist_vector_regression();
     test_incremental_update_matches_one_shot();
+    test_sha224_empty_string_official_vector();
+    test_sha224_abc_official_vector();
+    test_sha224_differs_from_sha256_regression();
+    test_one_byte_at_a_time_update_regression();
     test_block_boundary_edge_case();
     printf("all tests passed\n");
     return 0;

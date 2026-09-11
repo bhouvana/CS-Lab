@@ -27,4 +27,14 @@ void sha256_hash(const uint8_t *data, size_t len, uint8_t digest[32]);
 // Writes a 65-byte (64 hex chars + NUL) lowercase hex string.
 void sha256_to_hex(const uint8_t digest[32], char hex[65]);
 
+// SHA-224 (FIPS 180-4): the exact same compression function and message
+// schedule as SHA-256, just a different initial hash value and a
+// truncated (28-byte, not 32) output -- the difference is entirely in
+// sha224_init/_final, not in the round logic itself. Same SHA256_CTX,
+// same sha256_update() in between.
+void sha224_init(SHA256_CTX *ctx);
+void sha224_final(SHA256_CTX *ctx, uint8_t digest[28]);
+void sha224_hash(const uint8_t *data, size_t len, uint8_t digest[28]);
+void sha224_to_hex(const uint8_t digest[28], char hex[57]); // 56 hex chars + NUL
+
 #endif
