@@ -89,11 +89,11 @@ cs-lab/
 | Graph Algorithms | C++ | Traversal, shortest paths, topo sort | done |
 | Bloom Filter | Rust | Probabilistic data structures | done |
 | Huffman | C | Entropy coding / compression | done |
-| SAT Solver | C++ | Constraint solving / NP-completeness | planned |
+| SAT Solver | C++ | Constraint solving / NP-completeness | done |
 | Tiny Language | Rust | Compilers | done |
 | Bytecode VM | C | Runtime systems | done |
 | LZ77 | C++ | Dictionary compression | planned |
-| SHA-256 | C | Cryptography | planned |
+| SHA-256 | C | Cryptography | done |
 | Cache Simulator | C++ | Computer architecture / locality | planned |
 | Branch Predictor | C++ | CPU architecture | planned |
 | Pipeline Simulator | Python | CPU pipelines / hazards | planned |

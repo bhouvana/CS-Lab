@@ -1,0 +1,7 @@
+c (x1 OR x2) AND (x1 OR NOT x2) AND (NOT x1 OR x2) AND (NOT x1 OR NOT x2)
+c forces x1 == x2 and x1 != x2 simultaneously: unsatisfiable
+p cnf 2 4
+1 2 0
+1 -2 0
+-1 2 0
+-1 -2 0
