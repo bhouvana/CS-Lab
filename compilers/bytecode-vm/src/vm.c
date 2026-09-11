@@ -136,6 +136,16 @@ int vm_run(VM *vm, int trace, FILE *out) {
             case OP_HALT:
                 if (trace) print_stack(out, vm);
                 return 0;
+            default:
+                // Unreachable via the text assembler (it only ever emits
+                // named mnemonics), but Program/Instruction are a public,
+                // constructible API -- nothing stops a caller building one
+                // directly with an out-of-range Opcode value. Without this,
+                // the switch matched nothing and silently fell through to
+                // "advance pc, keep going", which is exactly the "quietly
+                // execute malformed bytecode" behavior CS-LAB.md forbids.
+                fprintf(stderr, "invalid opcode %d at pc=%zu\n", (int)instr.op, vm->pc);
+                return -1;
         }
 
         if (trace && instr.op != OP_HALT) print_stack(out, vm);

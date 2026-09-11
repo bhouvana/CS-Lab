@@ -1,10 +1,16 @@
 // Plain assert-based tests, no framework.
+//
+// fileno()/dup()/dup2() are POSIX, not ISO C; -std=c11 alone hides them
+// on glibc. _POSIX_C_SOURCE must be defined before the first system
+// header pulls in its feature-test-macro guards.
+#define _POSIX_C_SOURCE 200809L
 #include "vm.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h> // dup/dup2 -- available on both glibc and MinGW-w64
 
 // Runs a program with PRINT/trace output captured to a scratch file
 // instead of real stdout, so tests can assert on exact output text.
@@ -158,6 +164,91 @@ static void test_assembler_normal_case(void) {
     free(p.code);
 }
 
+static void test_invalid_opcode_invalid_case(void) {
+    // Not reachable through the text assembler (it only ever emits named
+    // mnemonics) -- constructed directly, the way any other embedder of
+    // this public Program/Instruction API could. Regression for the
+    // switch in vm_run() having no `default`, which used to silently
+    // skip an unrecognized opcode and keep running instead of rejecting it.
+    Instruction code[] = {{(Opcode)99, 0}};
+    Program p = {code, 1};
+    VM vm;
+    vm_init(&vm, &p);
+    assert(vm_run(&vm, 0, stdout) == -1);
+    printf("ok: invalid opcode rejected\n");
+}
+
+// Deterministic malformed-input fuzzing (CS-LAB.md §11): no libFuzzer in
+// this environment, so instead a fixed-seed PRNG generates a large,
+// reproducible corpus of straight-line programs -- random opcodes
+// (including out-of-range ones), random operands, random length -- and
+// asserts only that vm_run() always terminates cleanly, via 0 or -1,
+// never a crash. Deliberately no JUMP/JUMP_IF_FALSE in the generated
+// mix: a random backward jump could build a genuine infinite loop, which
+// belongs in a future timeout-guarded harness, not in a test suite that
+// must finish. Every other opcode's bounds-checking is exercised freely,
+// including the invalid-opcode path above.
+#define FUZZ_SEED 20260911u
+#define FUZZ_PROGRAMS 20000
+
+// rand_r() is POSIX-only (not guaranteed on MinGW); a small xorshift32
+// keeps this test's randomness identical on every platform this repo
+// builds on, which matters since "deterministic" is the whole point.
+static uint32_t xorshift32(uint32_t *state) {
+    uint32_t x = *state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return *state = x;
+}
+
+static void test_random_programs_never_crash_fuzz(void) {
+    static const Opcode fuzzable[] = {
+        OP_PUSH, OP_POP, OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_LOAD, OP_STORE, OP_PRINT, OP_HALT,
+    };
+    uint32_t seed = FUZZ_SEED;
+    FILE *sink = fopen("tests/tmp_fuzz.out", "w");
+    assert(sink != NULL);
+
+    // Rejecting malformed input means vm_run() reports it -- to stderr,
+    // always, regardless of `out` -- so 20000 mostly-malformed programs
+    // would otherwise flood the console with expected, not diagnostic,
+    // noise. Redirect fd 2 into the sink for the loop, then restore the
+    // real stderr via a saved dup -- fd-level, so it survives even if
+    // something in between calls fflush/freopen on the FILE* itself.
+    fflush(stderr);
+    int saved_stderr = dup(2);
+    assert(saved_stderr != -1);
+    dup2(fileno(sink), 2);
+
+    for (int p = 0; p < FUZZ_PROGRAMS; p++) {
+        int count = 1 + (int)(xorshift32(&seed) % 16);
+        Instruction code[16];
+        for (int i = 0; i < count; i++) {
+            // ~10% of instructions are an intentionally out-of-range
+            // opcode (100..109), not just the well-formed set.
+            uint32_t roll = xorshift32(&seed) % 100;
+            Opcode op = (roll < 10) ? (Opcode)(100 + roll) : fuzzable[xorshift32(&seed) % 10];
+            int64_t operand = (int64_t)(xorshift32(&seed) % 512) - 256;
+            code[i] = (Instruction){op, operand};
+        }
+        Program prog = {code, (size_t)count};
+        VM vm;
+        vm_init(&vm, &prog);
+        int result = vm_run(&vm, 0, sink);
+        assert(result == 0 || result == -1); // never anything else, never a crash
+    }
+
+    fflush(stderr);
+    dup2(saved_stderr, 2);
+    close(saved_stderr);
+
+    fclose(sink);
+    remove("tests/tmp_fuzz.out");
+    printf("ok: %d random straight-line programs (seed %u) -> vm_run always returns 0 or -1\n", FUZZ_PROGRAMS,
+           FUZZ_SEED);
+}
+
 static void write_file(const char *path, const char *contents) {
     FILE *f = fopen(path, "w");
     assert(f != NULL);
@@ -210,6 +301,8 @@ int main(void) {
     test_assembler_unknown_mnemonic_invalid_case();
     test_assembler_missing_operand_invalid_case();
     test_empty_program_edge_case();
+    test_invalid_opcode_invalid_case();
+    test_random_programs_never_crash_fuzz();
     printf("all tests passed\n");
     return 0;
 }
