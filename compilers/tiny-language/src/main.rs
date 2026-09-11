@@ -1,8 +1,9 @@
 // CLI:
-//   atlas run    <file.atlas>   execute the program
-//   atlas tokens <file.atlas>   print the token stream
-//   atlas ast    <file.atlas>   print the parsed AST
-//   atlas                       pipeline demo (no args — see default_demo)
+//   atlas run     <file.atlas>   execute the program
+//   atlas tokens  <file.atlas>   print the token stream
+//   atlas ast     <file.atlas>   print the parsed AST
+//   atlas compile <file.atlas>   emit bytecode-vm assembly instead of running it
+//   atlas                        pipeline demo (no args — see default_demo)
 use std::env;
 use std::fs;
 
@@ -19,7 +20,9 @@ fn main() {
         return;
     }
     if args.len() != 3 {
-        eprintln!("usage:\n  atlas run    <file.atlas>\n  atlas tokens <file.atlas>\n  atlas ast    <file.atlas>");
+        eprintln!(
+            "usage:\n  atlas run     <file.atlas>\n  atlas tokens  <file.atlas>\n  atlas ast     <file.atlas>\n  atlas compile <file.atlas>"
+        );
         std::process::exit(2);
     }
     let mode = args[1].as_str();
@@ -70,8 +73,15 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        "compile" => match tiny_language::compiler::compile(&program) {
+            Ok(asm) => print!("{asm}"),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
         other => {
-            eprintln!("unknown mode '{other}', expected run|tokens|ast");
+            eprintln!("unknown mode '{other}', expected run|tokens|ast|compile");
             std::process::exit(2);
         }
     }

@@ -7,6 +7,7 @@
 //! system — see the lab README for why.
 
 pub mod ast;
+pub mod compiler;
 pub mod interpreter;
 pub mod lexer;
 pub mod parser;
@@ -24,4 +25,14 @@ pub fn run_source(source: &str) -> Result<Vec<i64>, String> {
     let mut interp = Interpreter::new();
     interp.run(&program).map_err(|e| format!("runtime error: {e}"))?;
     Ok(interp.output)
+}
+
+/// Lexes and parses source, then compiles it to bytecode-vm's text
+/// assembly format instead of running it. Used by the CLI's `compile`
+/// mode and by the cross-lab speed-comparison test.
+pub fn compile_source(source: &str) -> Result<String, String> {
+    let tokens = lexer::tokenize(source).map_err(|e| format!("lex error (line {}): {}", e.line, e.message))?;
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse_program().map_err(|e| format!("parse error: {e}"))?;
+    compiler::compile(&program)
 }

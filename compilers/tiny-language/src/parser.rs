@@ -114,6 +114,42 @@ impl Parser {
                 self.expect(&Token::Semi)?;
                 Ok(Stmt::Assign(name, expr))
             }
+            Token::For => {
+                // `for (let i = 0; i < n; i = i + 1) { body }` is sugar
+                // for `{ let i = 0; while (i < n) { body; i = i + 1; } }`
+                // -- the interpreter never sees a For node at all, only
+                // the Block/While/Assign it already knows how to run.
+                self.advance();
+                self.expect(&Token::LParen)?;
+
+                if *self.peek() != Token::Let {
+                    return Err(format!(
+                        "line {}: for-loop init clause must be a 'let' statement",
+                        self.line()
+                    ));
+                }
+                let init = self.parse_stmt()?; // consumes the init's own trailing ';'
+
+                let cond = self.parse_expr()?;
+                self.expect(&Token::Semi)?;
+
+                // Step is an assignment, but with no trailing ';' of its
+                // own -- the ')' is what ends it.
+                let step_name = self.expect_ident()?;
+                self.expect(&Token::Assign)?;
+                let step_expr = self.parse_expr()?;
+                let step = Stmt::Assign(step_name, step_expr);
+
+                self.expect(&Token::RParen)?;
+                let mut body = self.parse_block()?;
+                body.push(step);
+
+                // Wrapped in a Block so the init variable is scoped to
+                // the loop, not leaked into the surrounding block --
+                // exactly what hand-writing the desugared form above
+                // would give you.
+                Ok(Stmt::Block(vec![init, Stmt::While(cond, body)]))
+            }
             other => Err(format!(
                 "line {}: unexpected token {:?} at start of statement",
                 self.line(),

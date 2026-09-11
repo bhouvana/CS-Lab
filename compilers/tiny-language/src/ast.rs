@@ -31,4 +31,8 @@ pub enum Stmt {
     /// else branch is an empty Vec when there was no `else`.
     If(Expr, Vec<Stmt>, Vec<Stmt>),
     While(Expr, Vec<Stmt>),
+    /// A bare `{ ... }` block, its own child scope. Currently produced
+    /// only by desugaring `for` (see parser.rs) -- there's no surface
+    /// syntax for a standalone block on its own.
+    Block(Vec<Stmt>),
 }

@@ -9,6 +9,7 @@ pub enum Token {
     If,
     Else,
     While,
+    For,
     Plus,
     Minus,
     Star,
@@ -81,6 +82,7 @@ pub fn tokenize(source: &str) -> Result<Vec<(Token, usize)>, LexError> {
                     "if" => Token::If,
                     "else" => Token::Else,
                     "while" => Token::While,
+                    "for" => Token::For,
                     _ => Token::Ident(text),
                 };
                 tokens.push((tok, line));
