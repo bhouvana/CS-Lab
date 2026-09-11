@@ -19,6 +19,18 @@ typedef enum {
     OP_SUB,
     OP_MUL,
     OP_DIV,
+    OP_MOD,
+    // Comparisons: pop b then a, push 1 if "a OP b" holds, else 0 --
+    // added so a real language (see compilers/tiny-language's
+    // compile-to-bytecode experiment) can compile `if`/`while`
+    // conditions at all; nothing upstream of this needs booleans as
+    // anything but the existing 0/1 integers already on the stack.
+    OP_LT,
+    OP_LE,
+    OP_GT,
+    OP_GE,
+    OP_EQ,
+    OP_NE,
     OP_LOAD,
     OP_STORE,
     OP_JUMP,

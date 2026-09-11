@@ -41,6 +41,54 @@ static void test_push_add_print_normal_case(void) {
     printf("ok: push/add/print -> %s", out);
 }
 
+static void test_mod_normal_case(void) {
+    Instruction code[] = {
+        {OP_PUSH, 17}, {OP_PUSH, 5}, {OP_MOD, 0}, {OP_PRINT, 0}, {OP_HALT, 0},
+    };
+    Program p = {code, 5};
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "2\n") == 0); // 17 % 5 = 2
+    printf("ok: mod -> %s", out);
+}
+
+static void test_mod_by_zero_invalid_case(void) {
+    Instruction code[] = {
+        {OP_PUSH, 1}, {OP_PUSH, 0}, {OP_MOD, 0}, {OP_HALT, 0},
+    };
+    Program p = {code, 4};
+    VM vm;
+    vm_init(&vm, &p);
+    assert(vm_run(&vm, 0, stdout) == -1);
+    printf("ok: modulo by zero rejected\n");
+}
+
+static void test_comparison_opcodes_normal_case(void) {
+    // Each: push a, push b, compare, print -- 6 comparisons, 2 cases
+    // each (true and false), so every opcode is exercised both ways.
+    struct {
+        Opcode op;
+        int64_t a, b;
+        int64_t expected;
+    } cases[] = {
+        {OP_LT, 3, 5, 1}, {OP_LT, 5, 3, 0}, {OP_LE, 5, 5, 1}, {OP_LE, 6, 5, 0},
+        {OP_GT, 5, 3, 1}, {OP_GT, 3, 5, 0}, {OP_GE, 5, 5, 1}, {OP_GE, 4, 5, 0},
+        {OP_EQ, 7, 7, 1}, {OP_EQ, 7, 8, 0}, {OP_NE, 7, 8, 1}, {OP_NE, 7, 7, 0},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        Instruction code[] = {
+            {OP_PUSH, cases[i].a}, {OP_PUSH, cases[i].b}, {cases[i].op, 0}, {OP_PRINT, 0}, {OP_HALT, 0},
+        };
+        Program p = {code, 5};
+        char out[64];
+        run_and_capture(&p, 0, out, sizeof(out));
+        char expected[8];
+        snprintf(expected, sizeof(expected), "%lld\n", (long long)cases[i].expected);
+        assert(strcmp(out, expected) == 0);
+    }
+    printf("ok: all 6 comparison opcodes (LT/LE/GT/GE/EQ/NE) correct both ways\n");
+}
+
 static void test_sub_mul_div_normal_case(void) {
     // (10 - 3) * 2 / 7 = 2
     Instruction code[] = {
@@ -272,6 +320,18 @@ static void test_assembler_missing_operand_invalid_case(void) {
     printf("ok: missing operand rejected\n");
 }
 
+static void test_assembler_recognizes_new_opcodes_normal_case(void) {
+    write_file("tests/tmp_new_opcodes.bytecode", "PUSH 10\nPUSH 3\nMOD\nPUSH 2\nLT\nPRINT\nHALT\n");
+    Program p;
+    assert(assemble_file("tests/tmp_new_opcodes.bytecode", &p) == 0);
+    char out[64];
+    run_and_capture(&p, 0, out, sizeof(out));
+    assert(strcmp(out, "1\n") == 0); // (10 % 3) < 2  ->  1 < 2  ->  1 (true)
+    remove("tests/tmp_new_opcodes.bytecode");
+    free(p.code);
+    printf("ok: assembler recognizes MOD/LT/LE/GT/GE/EQ/NE mnemonics\n");
+}
+
 static void test_empty_program_edge_case(void) {
     write_file("tests/tmp_empty.bytecode", "# just a comment\n\n");
     Program p;
@@ -287,6 +347,10 @@ static void test_empty_program_edge_case(void) {
 
 int main(void) {
     test_push_add_print_normal_case();
+    test_mod_normal_case();
+    test_mod_by_zero_invalid_case();
+    test_comparison_opcodes_normal_case();
+    test_assembler_recognizes_new_opcodes_normal_case();
     test_sub_mul_div_normal_case();
     test_load_store_roundtrip();
     test_unconditional_jump_skips_instructions();

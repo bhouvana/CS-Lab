@@ -12,6 +12,13 @@ const char *opcode_name(Opcode op) {
         case OP_SUB: return "SUB";
         case OP_MUL: return "MUL";
         case OP_DIV: return "DIV";
+        case OP_MOD: return "MOD";
+        case OP_LT: return "LT";
+        case OP_LE: return "LE";
+        case OP_GT: return "GT";
+        case OP_GE: return "GE";
+        case OP_EQ: return "EQ";
+        case OP_NE: return "NE";
         case OP_LOAD: return "LOAD";
         case OP_STORE: return "STORE";
         case OP_JUMP: return "JUMP";
@@ -29,6 +36,9 @@ static int mnemonic_to_opcode(const char *text, Opcode *out) {
     } table[] = {
         {"PUSH", OP_PUSH},          {"POP", OP_POP},   {"ADD", OP_ADD},
         {"SUB", OP_SUB},            {"MUL", OP_MUL},   {"DIV", OP_DIV},
+        {"MOD", OP_MOD},            {"LT", OP_LT},     {"LE", OP_LE},
+        {"GT", OP_GT},              {"GE", OP_GE},     {"EQ", OP_EQ},
+        {"NE", OP_NE},
         {"LOAD", OP_LOAD},          {"STORE", OP_STORE},
         {"JUMP", OP_JUMP},          {"JUMP_IF_FALSE", OP_JUMP_IF_FALSE},
         {"PRINT", OP_PRINT},        {"HALT", OP_HALT},

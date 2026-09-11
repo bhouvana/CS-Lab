@@ -109,6 +109,38 @@ int vm_run(VM *vm, int trace, FILE *out) {
                 }
                 if (do_push(vm, a / b) != 0) return -1;
                 break;
+            case OP_MOD:
+                if (do_pop(vm, &b) != 0 || do_pop(vm, &a) != 0) return -1;
+                if (b == 0) {
+                    fprintf(stderr, "modulo by zero at pc=%zu\n", vm->pc);
+                    return -1;
+                }
+                if (do_push(vm, a % b) != 0) return -1;
+                break;
+            case OP_LT:
+                if (do_pop(vm, &b) != 0 || do_pop(vm, &a) != 0) return -1;
+                if (do_push(vm, a < b) != 0) return -1;
+                break;
+            case OP_LE:
+                if (do_pop(vm, &b) != 0 || do_pop(vm, &a) != 0) return -1;
+                if (do_push(vm, a <= b) != 0) return -1;
+                break;
+            case OP_GT:
+                if (do_pop(vm, &b) != 0 || do_pop(vm, &a) != 0) return -1;
+                if (do_push(vm, a > b) != 0) return -1;
+                break;
+            case OP_GE:
+                if (do_pop(vm, &b) != 0 || do_pop(vm, &a) != 0) return -1;
+                if (do_push(vm, a >= b) != 0) return -1;
+                break;
+            case OP_EQ:
+                if (do_pop(vm, &b) != 0 || do_pop(vm, &a) != 0) return -1;
+                if (do_push(vm, a == b) != 0) return -1;
+                break;
+            case OP_NE:
+                if (do_pop(vm, &b) != 0 || do_pop(vm, &a) != 0) return -1;
+                if (do_push(vm, a != b) != 0) return -1;
+                break;
             case OP_LOAD:
                 if (!valid_slot(vm, instr.operand)) return -1;
                 if (do_push(vm, vm->memory[instr.operand]) != 0) return -1;
