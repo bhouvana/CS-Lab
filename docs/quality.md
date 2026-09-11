@@ -22,7 +22,7 @@
 | Tiny LSM | PASS | PASS | PASS (`io::Result`) | PASS | PASS | PASS | PASS | PASS (Rust + clippy clean) |
 | Constant-Time Compare | PASS | PASS | N/A (fixed-size comparison, no invalid input) | PASS | PARTIAL³ | PASS (explicit noise caveat) | PASS | PASS (ASan+UBSan) |
 | Allocator | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS (ASan+UBSan) |
-| Shell | N/A | N/A | N/A | N/A | N/A | PASS (states "not implemented" plainly) | N/A | N/A |
+| Shell | PASS | PASS (15, incl. SIGINT regression) | PASS | PASS (Linux; clean `skip:` elsewhere) | PASS | PASS | PASS | PASS (ASan+UBSan) |
 | TCP Chat | PASS | PASS (incl. SIGPIPE + isolation regressions) | PASS | PASS (Linux; clean `skip:` elsewhere) | PASS | PASS | PASS | PASS (ASan+UBSan) |
 | Calling Convention | PASS | PASS | N/A (no invalid-input surface -- pure ABI demo) | PASS (Linux x86-64; clean `skip:` elsewhere) | PASS | PASS | PASS | PARTIAL (hand-written `.S` isn't ASan-instrumented; the C caller is safe by inspection) |
 | Stack Frames | PASS | PASS (parser + end-to-end) | PASS (empty-input case) | PASS (Linux x86-64; clean `skip:` elsewhere) | PASS | PASS | N/A | PARTIAL (same as above) |

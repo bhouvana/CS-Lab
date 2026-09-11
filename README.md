@@ -2,21 +2,21 @@
 
 # CS-Lab
 
-### A hands-on laboratory for fundamental Computer Science — 19 small, hardened, real implementations, one measured experiment each, zero fabricated numbers.
+### A hands-on laboratory for fundamental Computer Science — 20 small, hardened, real implementations, one measured experiment each, zero fabricated numbers.
 
 **Twelve domains, from a DPLL SAT solver to a speculative-execution-safe compare, a hand-rolled SHA-256 to a Raft cluster that survives repeated leader failure. Every lab ships with its own tests, its own README, and its own real benchmark — run, read, and reproducible, not asserted.**
 
 ![Domains](https://img.shields.io/badge/domains-12-2f7fd6?style=flat-square)
-![Labs](https://img.shields.io/badge/labs-19%20implemented%20%2F%2020%20scoped-2f7fd6?style=flat-square)
+![Labs](https://img.shields.io/badge/labs-20%2F20%20implemented-2f7fd6?style=flat-square)
 ![Languages](https://img.shields.io/badge/languages-C%20%C2%B7%20C%2B%2B%20%C2%B7%20Rust%20%C2%B7%20Python%20%C2%B7%20x86--64%20ASM-2f7fd6?style=flat-square)
 
 ![Tests](https://img.shields.io/badge/tests-real%2C%20per--lab%2C%20invalid--input%20cases%20included-1f8f6e?style=flat-square)
-![Sanitizers](https://img.shields.io/badge/ASan%2BUBSan-9%2F9%20priority%20labs%20clean-1f8f6e?style=flat-square)
+![Sanitizers](https://img.shields.io/badge/ASan%2BUBSan-10%20labs%20clean-1f8f6e?style=flat-square)
 ![Rust](https://img.shields.io/badge/rust-fmt%20%2B%20clippy%20clean-1f8f6e?style=flat-square)
 ![Regressions](https://img.shields.io/badge/real%20bugs%20found%20%26%20fixed-8%2C%20all%20regression--guarded-1f8f6e?style=flat-square)
 
 [![CI](https://github.com/bhouvana/CS_Lab/actions/workflows/ci.yml/badge.svg)](https://github.com/bhouvana/CS_Lab/actions/workflows/ci.yml)
-![Platform](https://img.shields.io/badge/platform-Windows%20%2B%20Linux%20%C2%B7%204%20labs%20Linux--only%20by%20design-b5790c?style=flat-square)
+![Platform](https://img.shields.io/badge/platform-Windows%20%2B%20Linux%20%C2%B7%205%20labs%20Linux--only%20by%20design-b5790c?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-b5790c?style=flat-square)
 
 </div>
@@ -82,10 +82,10 @@ Every lab follows the same shape:
 └── examples/    sample input files the tests and benchmarks read
 ```
 
-19 of the 20 labs scoped in [CS-LAB.md](CS-LAB.md) are built; the 20th
-(`os/shell`) is honestly marked `planned, not yet implemented` in its own
-README rather than either rushed out or silently dropped from the count.
-See [docs/quality.md](docs/quality.md) for the per-lab scorecard.
+All 20 labs scoped in [CS-LAB.md](CS-LAB.md) are built, tested, and
+measured — `os/shell`, the last of them, was completed alongside this
+repo's hardening pass, to the identical standard as the other 19. See
+[docs/quality.md](docs/quality.md) for the per-lab scorecard.
 
 ---
 
@@ -110,7 +110,7 @@ See [docs/quality.md](docs/quality.md) for the per-lab scorecard.
 | Distributed Systems | [Raft Simulator](distributed/raft-simulator) | Rust | Leader election, log replication, deterministic recovery |
 | Security | [Constant-Time Compare](security/constant-time) | C | Timing side channels, and their honest limits |
 | Operating Systems | [Allocator](os/allocator) | C | malloc/free/realloc, splitting, coalescing, fragmentation |
-| Operating Systems | [Shell](os/shell) | C | *planned, not yet built* |
+| Operating Systems | [Shell](os/shell) | C | POSIX shell: fork/exec/wait, builtins, quote-aware tokenizing |
 | Assembly | [Calling Convention](assembly/calling-convention) | C + x86-64 ASM | System V ABI: argument/return registers, caller/callee-saved |
 | Assembly | [Stack Frames](assembly/stack-frames) | C + x86-64 ASM | RSP/RBP, the red zone, a real stack-frame visualizer |
 | Assembly | [Syscall Lab](assembly/syscall-demo) | C + x86-64 ASM | Raw Linux syscalls, kernel-crossing cost |
@@ -179,9 +179,9 @@ original 20-lab build — not a rewrite, a pass to make what already worked
   it. Every one has a named test; the full table with fix location and
   test name is [docs/regressions.md](docs/regressions.md).
 - **AddressSanitizer + UndefinedBehaviorSanitizer clean** on all 9 labs
-  CS-LAB.md's own priority list names (`make sanitize`, or `make test-asan`
-  per lab) — allocator, garbage collector, bytecode VM, SHA-256, Huffman,
-  LZ77, TCP chat, SAT solver, constant-time compare.
+  CS-LAB.md's own priority list names, plus `os/shell` (`make sanitize`, or
+  `make test-asan` per lab) — allocator, garbage collector, bytecode VM,
+  SHA-256, Huffman, LZ77, TCP chat, SAT solver, constant-time compare, shell.
   [docs/engineering-audit.md](docs/engineering-audit.md) has the per-lab
   detail, including what's *not* sanitizer-checked and why.
 - **A deterministic fuzz test** (`compilers/bytecode-vm`): a fixed-seed
@@ -226,7 +226,7 @@ cd CS_Lab
 
 make build       # build every lab (skips Rust labs cleanly if cargo isn't on PATH)
 make test        # run every lab's tests
-make sanitize    # ASan+UBSan on the 9 priority labs (needs a Linux/glibc toolchain)
+make sanitize    # ASan+UBSan on the 10 labs with a test-asan target (needs a Linux/glibc toolchain)
 make format      # cargo fmt --check (Rust) + a clang-format report (C/C++, informational)
 make lint        # cargo clippy -D warnings (Rust)
 make check       # format + build + test — the fast local gate
@@ -245,9 +245,10 @@ everything else needs WSL or another Linux/POSIX environment — see
 toolchain was used where, and why root `make` can't exercise both halves in
 one native-Windows run.
 
-The three `assembly/*` labs and `networking/tcp-chat` are Linux
-(x86-64, for the assembly labs specifically) only — their Makefiles detect
-the platform and print a `skip:` line instead of building on anything else.
+The three `assembly/*` labs, `networking/tcp-chat`, and `os/shell` are
+Linux (x86-64, for the assembly labs specifically) only — their Makefiles
+detect the platform and print a `skip:` line instead of building on
+anything else.
 For the assembly labs this isn't a portability nicety: the hand-written code
 assumes Linux-specific conventions (the System V calling convention, real
 Linux syscall numbers) that would produce silently wrong results, not a
@@ -288,7 +289,7 @@ cs-lab/
 ├── networking/       tcp-chat
 ├── distributed/      raft-simulator
 ├── security/         constant-time
-├── os/               allocator · shell (planned)
+├── os/               allocator · shell
 └── assembly/         calling-convention · stack-frames · syscall-demo
 ```
 

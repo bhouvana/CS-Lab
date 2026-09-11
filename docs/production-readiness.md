@@ -4,6 +4,15 @@ CS-Lab Hardened pass, 2026-09-11. This is the closing report the hardening
 directive (`CS-LAB-HARDENED.md`, if kept, or the conversation that produced
 this pass) asked for.
 
+**Update, same day:** after this report was first written (19 of 20 labs
+implemented, `os/shell` correctly documented as planned-but-not-built), the
+repo's owner asked for all 20. `os/shell` was then built to the identical
+standard as the other 19 -- see `os/shell/README.md` and the new entries
+throughout this document and `docs/engineering-audit.md`, `docs/quality.md`.
+Every count below (sanitizer coverage, Linux-only lab count, the closing
+"production-ready" claim) reflects that addition; nothing else in this
+report was retroactively changed.
+
 ## What changed?
 
 Starting point: 20 working labs, real measured experiments, 7 previously
@@ -47,9 +56,13 @@ documentation.
   and `test_random_programs_never_crash_fuzz` (20,000-program deterministic
   fuzz test, fixed-seed xorshift32, asserts `vm_run()` never returns
   anything but 0 or -1).
-- No other new test files -- the audit's main finding was that the existing
-  test suites (19 lab test files, 32 Rust tests + ~100 C/C++ assertions
-  across the rest) were already substantially edge-case-covered: every lab
+- `os/shell/tests/test_shell.c` (new lab, not a hardening addition to an
+  existing one): 15 tests -- 9 direct unit tests against its tokenizer, 6
+  integration tests that fork+exec the real shell binary, including a
+  named `SIGINT`-survival regression test.
+- No other new test files in the original 19 -- the audit's main finding
+  was that their existing test suites (32 Rust tests + ~100 C/C++
+  assertions) were already substantially edge-case-covered: every one
   already had invalid-input, boundary, and regression cases before this
   pass started. See `docs/engineering-audit.md`'s per-lab test counts.
 
@@ -65,9 +78,11 @@ AddressSanitizer + UndefinedBehaviorSanitizer (`-fsanitize=address,undefined
 -g`), via GCC 15.2.0 on WSL2 Ubuntu. No LeakSanitizer run separately (ASan's
 `detect_leaks=1` default covers it, and was enabled during ad hoc
 verification runs). Not run: native Windows/MinGW (no sanitizer runtime for
-this MinGW build), and the 4 non-priority C/C++ labs (graph-algorithms,
+this MinGW build), and the 3 non-priority C/C++ labs (graph-algorithms,
 cache, branch-predictor) plus the 3 assembly labs' `.S` files (not
-ASan-instrumentable). See `docs/quality.md` footnote 2.
+ASan-instrumentable). `os/shell`, added after this report's first pass,
+did get a `test-asan` target -- plain C, no reason not to. See
+`docs/quality.md` footnote 2.
 
 ## What fuzzing was performed?
 
@@ -89,14 +104,15 @@ available, and no libFuzzer/AFL setup exists in this environment.
   11 portable C/C++/Python labs. See `docs/reproducibility.md` for exact
   toolchain versions used on each side.
 - **Linux/POSIX only, by design (verified on WSL2 Ubuntu):**
-  `networking/tcp-chat` (POSIX sockets).
+  `networking/tcp-chat` and `os/shell` (both need `fork`/POSIX APIs
+  Windows doesn't have).
 - **Linux x86-64 only, by design (verified on WSL2 Ubuntu):** the 3
   assembly labs -- hand-written code assumes the System V calling
   convention and real Linux syscall numbers; this isn't a portability nicety,
   it would produce silently wrong results under a different ABI, not a
   clean build failure.
 
-All four Linux-only labs' Makefiles detect the platform and print an
+All five Linux-only labs' Makefiles detect the platform and print an
 explicit `skip:` line (exit 0) rather than failing when built elsewhere.
 
 ## What platforms are intentionally unsupported?
@@ -127,9 +143,11 @@ methodology* in the one place it was broken (huffman).
   step was verified independently on the appropriate side (Windows for
   Rust, WSL for everything else), which is real evidence but not the same
   claim as "CI is green." See `docs/reproducibility.md`.
-- Sanitizer coverage is 9 of ~15 eligible C/C++ labs (the CS-LAB.md §12
-  priority list), not all of them. The remaining 6 are untested by
-  sanitizers, not known-broken.
+- Sanitizer coverage is 10 of ~16 eligible C/C++ labs (the 9 named in
+  CS-LAB.md §12's priority list, plus `os/shell`, added when it was built).
+  The remaining 6 (graph-algorithms, cache, branch-predictor, and the 3
+  assembly labs' hand-written `.S`, which ASan can't instrument anyway) are
+  untested by sanitizers, not known-broken.
 - No fuzz harness beyond bytecode-vm's. The other parsers rely on
   deterministic malformed-input test cases, which cover the same intent
   (per CS-LAB.md §11's own stated preference) but not the same breadth a
@@ -143,9 +161,6 @@ methodology* in the one place it was broken (huffman).
   `-Wall -Wextra -Wpedantic` warnings already required by every C/C++
   Makefile, and now verified at 0 across a full clean rebuild, are the
   static-analysis coverage that does exist.
-- `os/shell` was never built. It's listed as "planned" in its own README
-  and was correctly left alone -- building a new lab is out of scope for a
-  hardening pass.
 - macOS is untested (see above).
 
 ## What does "production-ready" mean for this repository?
@@ -161,6 +176,5 @@ READMEs. It means:
 > known correctness or memory-safety defects under its supported operating
 > conditions.
 
-That standard is met for all 20 labs (19 implemented + `shell` correctly
-documented as not implemented, rather than either built out of scope or
-silently missing from the record).
+That standard is met for all 20 labs -- `os/shell`, the last of them,
+included.

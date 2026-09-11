@@ -31,7 +31,6 @@ failure.
 | Tiny LSM | Rust | PASS (fmt+clippy clean) | PASS (9) | N/A | N/A | PASS | PASS (io::Result) |
 | Constant-Time Compare | C | PASS | PASS (7) | PASS (ASan+UBSan) | N/A | PASS | N/A |
 | Allocator | C | PASS | PASS (12) | PASS (ASan+UBSan) | N/A | PASS | PASS |
-| Shell | -- | N/A | N/A | N/A | N/A | N/A | **not implemented** (planned, never started -- see `os/shell/README.md`) |
 
 ## Linux-only labs (build/test on Linux only; SKIP on Windows, not FAIL)
 
@@ -42,6 +41,7 @@ failure.
 | Stack Frames | C/ASM | PASS | PASS (4 + 1 end-to-end) | N/A | N/A | SKIP |
 | Syscall Lab | C/ASM | PASS | PASS (5) | N/A | PASS | SKIP |
 | Raft Simulator | Rust | PASS (fmt+clippy clean) | PASS (8) | N/A | N/A (deterministic tick-driven, no wall-clock bench) | PASS (Rust is cross-platform; this one just has no Linux-specific dependency either) |
+| Shell | C | PASS | PASS (15, incl. SIGINT regression) | PASS (ASan+UBSan) | PASS (real clock_gettime/CLOCK_MONOTONIC) | SKIP (Makefile detects non-Linux, prints `skip:`) |
 
 Raft is cross-platform (pure Rust, no Linux dependency) and is listed here
 only because distributed systems fit next to networking conceptually --
@@ -91,6 +91,26 @@ only because distributed systems fit next to networking conceptually --
 10. **No CI.** Added a single-job GitHub Actions workflow (see
     `docs/reproducibility.md` for why it hasn't been run here -- no
     configured remote in this environment).
+11. **`os/shell` was scoped but never built** ("planned, not yet
+    implemented" since the original Phase 6). Built to the same standard
+    as the other 19 (fork/execvp/waitpid, 3 builtins, quote-aware
+    tokenizing, correct `SIGINT` handling, 15 tests, ASan+UBSan clean,
+    a real fork+exec+wait throughput benchmark) once the repo's owner
+    asked for all 20 rather than 19 -- see its own README for the design
+    and `docs/regressions.md`-adjacent note below for a bug caught
+    *during* construction, before it ever shipped broken.
+
+While building it, `os/shell/src/bench.c` hit the exact
+buffered-stdout-duplicated-into-`fork()`'d-child bug
+`networking/tcp-chat`'s `bench.c` already documents (a `fork()` copies
+still-unflushed `stdout` content into the child; something in the
+child's teardown flushes that inherited copy a second time into the
+shared descriptor). Recognized immediately from the existing comment in
+tcp-chat's bench.c and fixed the same way (`fflush(stdout)` right before
+`fork()`) before the file was ever committed in a broken state -- not
+added to `docs/regressions.md` since there's no shipped-broken state and
+no dedicated regression test guarding it, just the fix and an explanation
+in the shell lab's own README under "What I learned."
 
 ## What this audit did NOT do
 
@@ -99,15 +119,13 @@ only because distributed systems fit next to networking conceptually --
   by this pass, except where a benchmark's *measurement method* itself was
   the finding (huffman, above).
 - Did not add `test-asan` to graph-algorithms, cache, branch-predictor, or
-  the assembly labs -- not on CS-LAB.md §12's priority list, and the
-  assembly labs' hand-written `.S` files aren't ASan-instrumentable anyway
-  (only their C callers would be, which adds little).
+  the 3 non-shell assembly labs -- not on CS-LAB.md §12's priority list,
+  and the assembly labs' hand-written `.S` files aren't ASan-instrumentable
+  anyway (only their C callers would be, which adds little). `os/shell`
+  got `test-asan` anyway since it's plain C and cost nothing extra.
 - Did not add a fuzz harness to every parser -- bytecode-vm got one
   (highest-value target: a public, embeddable API executing structured
   input). SAT/Huffman/LZ77/tiny-language already have deterministic
   malformed-input test cases covering the same intent at lower cost; see
   CS-LAB.md §11's own preference for "discovering malformed-input bugs"
   over volume.
-- Did not build `os/shell` -- it was never implemented (see
-  `os/shell/README.md`), and building a new lab is out of scope for a
-  hardening pass (CS-LAB.md §0, §45).
