@@ -1,0 +1,18 @@
+Huffman coding assigns shorter bit patterns to more frequent symbols and
+longer bit patterns to rarer symbols, so that the average number of bits
+per symbol is minimized for a known frequency distribution. It was
+published by David Huffman in 1952 while he was a student at MIT, as the
+answer to a term paper problem his professor Robert Fano had been unable
+to solve optimally himself. The key insight is a greedy one: always merge
+the two least frequent remaining symbols into a new combined symbol, and
+repeat until only one symbol remains, which becomes the root of a binary
+tree. Reading the path from the root to any original leaf, left branches
+as 0 and right branches as 1, gives that leaf a prefix-free binary code. No
+code is ever a prefix of another, so a decoder can read the bitstream one
+bit at a time and unambiguously recover the original symbols. English
+text compresses well under this scheme because letter frequencies are far
+from uniform: the letter e appears far more often than the letter z, so e
+ends up with a short code and z with a long one, and the average code
+length across a real English document ends up well under eight bits per
+character even though the alphabet nominally needs eight bits to store
+naively as ASCII bytes.

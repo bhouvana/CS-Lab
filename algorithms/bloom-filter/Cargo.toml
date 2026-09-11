@@ -1,0 +1,9 @@
+[package]
+name = "bloom-filter"
+version = "0.1.0"
+edition = "2021"
+description = "Educational Bloom filter: insert/contains over a fixed bit array, plus a false-positive-rate experiment."
+
+[[bin]]
+name = "bloom"
+path = "src/main.rs"

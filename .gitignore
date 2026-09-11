@@ -1,0 +1,19 @@
+# Build artifacts
+target/
+build/
+*.o
+*.obj
+*.exe
+*.out
+*.a
+*.so
+*.dll
+
+# Rust
+target/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
