@@ -56,7 +56,7 @@ branch outcome trace (T/N sequence)
 - `include/patterns.hpp` / `src/patterns.cpp` — synthetic pattern
   generators and the trace file loader.
 - `src/main.cpp` — CLI (single predictor, or a comparison table).
-- `src/bench.cpp` — the cross-pattern experiment.
+- `src/bench.cpp` — the four benchmark experiments.
 - `tests/test_predictors.cpp` — 9 tests, including the specific
   claims above (2-bit beats 1-bit on a loop pattern; gshare learns
   alternating; 1-bit is ~0% on alternating, its worst case).
@@ -124,6 +124,33 @@ GShare                89.5%
 (Always-taken and always-not-taken scores on the always-taken pattern
 omitted above for space — see `docs/experiments.md` for the full run.)
 
+**2. How much history does GShare need?** A period-10 loop is evaluated
+with history widths from 1 through 12 bits.
+
+```text
+history bits  accuracy
+1-8           90.0%
+9             100.0%
+10            100.0%
+11-12         99.9%
+```
+
+**3. Does PC indexing help when branches are interleaved?** Two
+different branch PCs are interleaved in a 4000-outcome trace: one has a
+period-4 pattern and the other alternates. An 8-bit PC-indexed GShare
+reaches 99.9% accuracy.
+
+**4. Can a tournament selector combine 1-bit and GShare?** The selector
+starts neutral and moves toward whichever component was correct when
+the components disagree.
+
+```text
+pattern       1-bit   GShare  tournament
+alternating   0.1%    99.8%   99.8%
+loop          80.0%   90.0%   90.0%
+biased        82.5%   89.5%   89.1%
+```
+
 ## Results
 
 Three findings, all from the real numbers above:
@@ -147,6 +174,13 @@ Three findings, all from the real numbers above:
    advantage is specific to patterns with learnable *history-dependent*
    structure (like alternating), not a universal win.
 
+  The history sweep makes the loop's period visible: fewer than 9 bits
+  cannot preserve enough context to distinguish the loop exit reliably,
+  while 9 or 10 bits can. PC-indexed GShare also learns the interleaved
+  two-branch trace, but the tournament selector is not automatically
+  better than GShare; on the biased trace its 89.1% trails GShare's 89.5%
+  because selector training has its own cold-start and noise costs.
+
 ## What I learned
 
 It would have been easy to only report the alternating-pattern result
@@ -164,15 +198,7 @@ instead of one favorable case is what surfaced that.
 - No tournament/hybrid predictor (choosing between two predictors per
   branch), which is what real high-end CPUs actually use.
 - Fixed 8-bit history register / 256-entry table for gshare — not
-  swept as a parameter.
-
-## Further experiments
-
-- Sweep gshare's history-register width and find where accuracy peaks
-  for the loop pattern specifically (period 10 doesn't divide evenly
-  into a power-of-two history length).
-- Extend the trace format to carry a PC per branch and implement a
-  true multi-branch gshare (`history XOR PC`), then construct a trace
-  where per-branch correlation actually matters.
-- Add a simple tournament predictor (meta-counter choosing between
-  1-bit and gshare per branch) and compare it against both.
+  swept as a CLI parameter; the sweep exists in `src/bench.cpp`.
+- PC-indexed GShare and the tournament selector exist in the benchmark
+  only; the simple public trace format still carries outcomes without
+  PCs.
