@@ -97,15 +97,15 @@ cs-lab/
 | Cache Simulator | C++ | Computer architecture / locality | done |
 | Branch Predictor | C++ | CPU architecture | done |
 | Pipeline Simulator | Python | CPU pipelines / hazards | done |
-| Allocator | C | Memory management | planned |
-| Garbage Collector | C | Runtime systems | planned |
+| Allocator | C | Memory management | done |
+| Garbage Collector | C | Runtime systems | done |
 | Tiny LSM | Rust | Storage systems | planned |
 | TCP Chat | C | Networking | planned |
 | Raft Simulator | Rust | Distributed systems | planned |
 | Constant-Time Compare | C | Side channels | planned |
-| Calling Convention | C/ASM | Machine-level programming | planned |
-| Stack Frames | C/ASM | Runtime/ABI | planned |
-| Syscall Lab | C/ASM | Operating systems | planned |
+| Calling Convention | C/ASM | Machine-level programming | done (Linux) |
+| Stack Frames | C/ASM | Runtime/ABI | done (Linux) |
+| Syscall Lab | C/ASM | Operating systems | done (Linux) |
 
 See [docs/learning-path.md](docs/learning-path.md) for a suggested order.
 
@@ -119,6 +119,14 @@ make clean       # remove build artifacts
 ```
 
 Each lab also builds and tests standalone from its own directory (`make` / `cargo test`).
+
+The three `assembly/*` labs are Linux x86-64 only — their Makefiles
+detect the platform and print a `skip:` line instead of building (not
+an error) on anything else, because the hand-written assembly assumes
+Linux-specific conventions (the System V calling convention, real
+Linux syscall numbers) that would produce wrong results or undefined
+behavior, not a clean build failure, under a different ABI. They were
+built and verified on real Linux (WSL Ubuntu) during development.
 
 ## What CS-Lab lets you see
 

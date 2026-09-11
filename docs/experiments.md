@@ -219,6 +219,94 @@ pipeline's natural one-cycle-apart cadence. The one hazard forwarding
 can't fully erase is load-use: stalls drop by half (2 -> 1 per pair)
 but never to zero, since a load's data isn't ready until after MEM.
 
+## Allocator (`os/allocator`)
+
+**Question:** how does allocation pattern affect fragmentation?
+
+```text
+Checkerboard (978 blocks x 1024 bytes): free=500848 bytes, largest=1024 bytes, fragmentation=99.8%
+  -> request for 3072 contiguous bytes (3 blocks' worth): FAILED
+LIFO free order (978 blocks x 1024 bytes): free=1048528 bytes, largest=1048528 bytes, fragmentation=0.0%
+```
+
+Freeing every other block leaves ~500KB free but scattered into 490
+single-block holes — a 3KB contiguous request fails despite ample
+total free memory. Freeing in LIFO order coalesces everything back
+into one block: 0% fragmentation. Same total freed, opposite outcome.
+
+## Garbage Collector (`runtimes/garbage-collector`)
+
+**Question:** how does collection time scale with heap size and
+live/garbage ratio?
+
+```text
+objects     % live    reps    ms/run
+1000        10        45      0.4444
+10000       50        7       3.0000
+100000      90        1       32.0000
+```
+
+Collection time scales linearly with heap size (~10x time per 10x
+objects); live/garbage ratio barely matters at fixed size, since total
+work (mark the live set, sweep every object) is dominated by heap size.
+An earlier recursive `mark()` crashed with a stack overflow on a
+90,000-object live chain — fixed with an iterative worklist, now a
+regression test (`test_long_chain_does_not_overflow_the_stack`).
+
+## Calling Convention (`assembly/calling-convention`)
+
+**Question:** what does a real CALL/RET plus register-passing cost vs.
+code the compiler inlines away?
+
+```text
+via add2 (real CALL/RET):            230.93 ms  (1.15 ns/call)
+via add_inline (compiler-inlined):   278.77 ms  (1.39 ns/call)
+```
+
+Surprising, reproducible result: the real function call is *faster*.
+Both loops are bottlenecked by store-to-load forwarding through a
+`volatile` accumulator; `add2`'s register-only arithmetic gets hidden
+behind that latency by out-of-order execution, while the inlined
+version's instruction scheduling doesn't hide it as well. Verified with
+`objdump` that `add_inline` really was inlined (no `call` in that loop)
+before accepting the surprising result as real, and confirmed
+reproducible with the loop order swapped.
+
+## Stack Frames (`assembly/stack-frames`)
+
+**Question:** how does local variable count affect compiled stack
+frame size?
+
+```text
+locals    bytes needed   actual frame (sub $N,%rsp)
+8         64             0
+16        128            8
+32        256            136
+```
+
+Up to 8 locals (64 bytes), the compiler emits **no** `sub %rsp` at
+all — the x86-64 System V ABI's 128-byte "red zone" absorbs it for
+leaf functions. Only once locals exceed 128 bytes does a real stack
+allocation appear (136 bytes for the 128-byte excess beyond the red
+zone, plus 8 for alignment).
+
+## Syscall Lab (`assembly/syscall-demo`)
+
+**Question:** how much does crossing into the kernel actually cost?
+
+```text
+my_write(devnull, ...):    130.75 ms  (130.8 ns/call)
+noop_call (no syscall):      0.24 ms  (0.2 ns/call)
+ratio: syscall is 534x the cost of a plain call
+```
+
+A syscall costs ~534x a plain userspace call (131ns vs 0.2ns) even to
+`/dev/null` — exactly why libc buffers stdio instead of calling
+`write()` per byte. Separately, `strace` caught a real bug while
+building this lab: `my_exit()` (a raw syscall) never flushes libc's
+stdio buffers, so `printf` output before it silently vanished until an
+explicit `fflush(stdout)` was added.
+
 ---
 
 *(Results for further labs are appended here as they're implemented.)*
