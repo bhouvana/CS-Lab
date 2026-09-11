@@ -153,6 +153,72 @@ threshold, and avg-backtracks/avg-runtime both peak sharply at ratio
 satisfiability threshold are measurably hardest for DPLL, exactly
 where SAT theory predicts.
 
+## Cache Simulator (`architecture/cache`)
+
+**Questions:** does associativity fix aliasing conflict misses? does
+increasing cache size improve hit rate?
+
+```text
+Experiment 1: associativity vs. aliasing conflict misses
+ways        hit rate
+1           0.00%
+2           0.00%
+4           0.00%
+8           99.50%
+
+Experiment 2: cache size vs. hit rate for a fixed working set
+size        hit rate
+1KB         0.00%
+2KB         0.00%
+4KB         99.50%
+8KB         99.50%
+```
+
+Both show a sharp cliff rather than a gradual curve: with 8 hot lines
+aliasing to one set, associativity below 8 gives 0% hit rate (every
+line evicted before reuse) and associativity 8 gives 99.5%. Same
+phenomenon from the size side: below the 4KB working-set size, 0%;
+at or above it, 99.5%.
+
+## Branch Predictor (`architecture/branch-predictor`)
+
+**Question:** which predictor handles which branch pattern best?
+
+```text
+Alternating: Always Taken 50.0%, 1-bit 0.1%, 2-bit 50.0%, GShare 99.8%
+Loop (9T/1N): Always Taken 90.0%, 1-bit 80.0%, 2-bit 90.0%, GShare 90.0%
+Biased (90%): Always Taken 90.4%, 1-bit 82.5%, 2-bit 89.6%, GShare 89.5%
+```
+
+1-bit is catastrophic on alternating sequences (0.1%, its exact worst
+case); GShare learns the alternating pattern almost perfectly (99.8%)
+by indexing on history instead of just the last outcome. 2-bit
+genuinely beats 1-bit on loop patterns (90.0% vs 80.0%). GShare does
+*not* dominate every pattern — it ties or slightly trails 2-bit on the
+loop and biased patterns, an honest result from testing a full spread
+of patterns rather than only gshare's best case.
+
+## Pipeline Simulator (`architecture/pipeline`)
+
+**Question:** how much does forwarding reduce stalls, and does that
+depend on hazard density?
+
+```text
+pattern                 stalls (no fwd) stalls (fwd)  CPI (no fwd)  CPI (fwd)   reduction
+independent (0%)        0               0             1.08          1.08        0.0%
+mixed (1-in-4)          24              0             1.56          1.08        100.0%
+mixed (1-in-2)          48              0             2.04          1.08        100.0%
+dependent chain (100%)  98              0             3.04          1.08        100.0%
+load-use pairs          50              25            2.08          1.58        50.0%
+```
+
+Forwarding eliminates 100% of ALU-to-ALU RAW hazard stalls regardless
+of dependency density (even a fully-dependent 50-instruction chain
+needs zero stalls) because EX/MEM bypassing lines up exactly with the
+pipeline's natural one-cycle-apart cadence. The one hazard forwarding
+can't fully erase is load-use: stalls drop by half (2 -> 1 per pair)
+but never to zero, since a load's data isn't ready until after MEM.
+
 ---
 
 *(Results for further labs are appended here as they're implemented.)*

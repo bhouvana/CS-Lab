@@ -94,9 +94,9 @@ cs-lab/
 | Bytecode VM | C | Runtime systems | done |
 | LZ77 | C++ | Dictionary compression | planned |
 | SHA-256 | C | Cryptography | done |
-| Cache Simulator | C++ | Computer architecture / locality | planned |
-| Branch Predictor | C++ | CPU architecture | planned |
-| Pipeline Simulator | Python | CPU pipelines / hazards | planned |
+| Cache Simulator | C++ | Computer architecture / locality | done |
+| Branch Predictor | C++ | CPU architecture | done |
+| Pipeline Simulator | Python | CPU pipelines / hazards | done |
 | Allocator | C | Memory management | planned |
 | Garbage Collector | C | Runtime systems | planned |
 | Tiny LSM | Rust | Storage systems | planned |
