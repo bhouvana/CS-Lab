@@ -74,10 +74,11 @@ main()
 - `scripts/walk_stack.py` — drives gdb, parses its output, renders the
   diagram.
 - `scripts/frame_size_experiment.py` — the stack-frame-size experiment.
-- `tests/test_walk_stack.py` — 5 tests: parser correctness against a
-  frozen real gdb transcript (no gdb required to run these), an empty-
-  input edge case, and one true end-to-end integration test that's
-  skipped (not failed) when gdb isn't installed.
+- `scripts/further_experiments.py` — the three follow-up experiments:
+  `bar()` frame sizing, the post-`main` startup caller, and the `-O2`
+  frame-pointer comparison.
+- `tests/test_walk_stack.py` and `tests/test_further_experiments.py` —
+  parser, rendering, measurement, and end-to-end checks.
 
 ## Example
 
@@ -105,8 +106,7 @@ main()  [frame base 0x7fffffffd880]
 `bar`'s saved return address (`0x...1b9`) is the exact instruction in
 `foo` right after `call bar`; `foo`'s (`0x...1f1`) is the instruction
 in `main` right after `call foo`. `main`'s return address lands inside
-glibc's startup code (`__libc_start_main`), not user code — main() has
-a caller too.
+glibc's startup code, not user code — main() has a caller too.
 
 `make objdump` shows `bar`'s real prologue/epilogue:
 
@@ -155,6 +155,59 @@ locals (256 bytes, exceeding the red zone by 128 bytes) forces a real
 16-byte aligned). This isn't a rounding quirk; it's the ABI's
 red-zone optimization made directly visible.
 
+### Experiment 1: `bar()` with a `printf` call
+
+The same local-count sweep was applied to `bar()` while retaining its
+`printf` call:
+
+```text
+locals    actual frame (sub $N,%rsp)
+0         32
+1         32
+2         48
+4         64
+8         96
+16        160
+32        288
+```
+
+This is the useful contrast with the first table. `bar()` is not a leaf
+function, so it cannot use the red zone for its locals across the
+`printf` call. It reserves 32 bytes even with no extra locals, and the
+frame grows as the locals exceed that call/alignment overhead. The
+first experiment's zero-byte cases therefore do not generalize to a
+function that calls another function.
+
+### Experiment 2: below `main()`
+
+The extended gdb run reported:
+
+```text
+bar -> foo -> main -> __libc_start_call_main (main's saved return address)
+```
+
+On this glibc build, gdb's normal unwind stops at `main` because the
+startup code does not provide another frame in this debugging session.
+The experiment still walks past `main` by reading `main`'s saved return
+address and asking gdb to resolve it. The resolved caller is
+`__libc_start_call_main`, the glibc startup helper that invokes
+`main()`; this is the current implementation-level caller rather than
+the public `__libc_start_main` entry point.
+
+### Experiment 3: `-O2` without an explicit frame pointer
+
+```text
+build                    frame-pointer prologue    gdb backtrace
+O0 + frame pointer        True                      bar -> foo -> main
+O2 default                False                     bar -> foo -> main
+```
+
+The optimized build omits the `push %rbp` / `mov %rsp,%rbp` prologue,
+but gdb still reconstructs these three frames from DWARF unwind data.
+The experiment demonstrates why the RBP-chain diagram is no longer a
+valid model at `-O2`; it does not imply that all debugging becomes
+impossible.
+
 ## What I learned
 
 My first read of this table looked like a bug (0 bytes allocated for
@@ -178,14 +231,3 @@ that unreserved memory before it returns.
 - Depends on gdb's `info frame` text format, which could change
   between gdb versions (the parser was written against gdb 17.1's
   output).
-
-## Further experiments
-
-- Compile `bar()` itself with varying numbers of extra locals below
-  the red zone threshold and confirm it also avoids a `sub` — right up
-  until it needs to spill enough to exceed 128 bytes combined with the
-  `printf` call's own requirements.
-- Walk the frame chain past `main()` into `__libc_start_main` and
-  identify what's really at the bottom of the call stack.
-- Rebuild `nested.c` with `-O2` (frame pointer omitted by default) and
-  see how much harder gdb's frame reconstruction becomes without it.

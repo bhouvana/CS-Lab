@@ -15,6 +15,12 @@
 // list, with block splitting and immediate-neighbor coalescing.
 
 void* my_malloc(size_t size);
+typedef enum {
+    ALLOCATOR_FIRST_FIT,
+    ALLOCATOR_BEST_FIT
+} AllocatorFit;
+void* my_malloc_fit(size_t size, AllocatorFit fit);
+void* my_malloc_best_fit(size_t size);
 void my_free(void* ptr);
 void* my_calloc(size_t nmemb, size_t size);
 void* my_realloc(void* ptr, size_t size);
@@ -25,6 +31,8 @@ void my_heap_reset(void);
 
 typedef struct {
     size_t allocated_bytes;    // sum of payload sizes currently allocated
+    size_t requested_bytes;     // bytes requested by callers for live allocations
+    size_t internal_fragmentation; // capacity minus requested bytes in live blocks
     size_t free_bytes;         // sum of payload sizes currently free
     size_t num_blocks;         // total blocks, free + allocated
     size_t num_free_blocks;

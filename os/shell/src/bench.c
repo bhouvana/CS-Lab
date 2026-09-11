@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -25,7 +26,7 @@ static double now_ms(void) {
 // Runs `n` "true" commands through a fresh ./shell process, piping them
 // all in at once and reading nothing back (true never prints), then
 // timing until the shell itself exits. Returns elapsed milliseconds.
-static double time_n_commands(int n) {
+static double time_n_commands(int n, const char *command) {
     int in_pipe[2]; // parent write end -> shell's stdin
     if (pipe(in_pipe) != 0) {
         perror("pipe");
@@ -59,7 +60,9 @@ static double time_n_commands(int n) {
 
     double t0 = now_ms();
     for (int i = 0; i < n; i++) {
-        if (write(in_pipe[1], "true\n", 5) != 5) {
+        size_t command_len = strlen(command);
+        if (write(in_pipe[1], command, command_len) != (ssize_t)command_len ||
+            write(in_pipe[1], "\n", 1) != 1) {
             perror("write");
             break;
         }
@@ -72,15 +75,37 @@ static double time_n_commands(int n) {
     return now_ms() - t0;
 }
 
+#if defined(__x86_64__)
+static long raw_getpid(void) {
+    long result;
+    __asm__ volatile("syscall" : "=a"(result) : "a"(SYS_getpid) : "rcx", "r11", "memory");
+    return result;
+}
+#endif
+
 int main(void) {
     printf("Benchmark: shell command-dispatch throughput (fork+exec+wait per command)\n\n");
     printf("%-12s%-14s%s\n", "commands", "elapsed(ms)", "commands/sec");
 
     int sizes[] = {100, 500, 2000};
     for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
-        double ms = time_n_commands(sizes[i]);
+        double ms = time_n_commands(sizes[i], "true");
         double per_sec = ms > 0.0 ? 1000.0 * (double)sizes[i] / ms : 0.0;
         printf("%-12d%-14.2f%.0f\n", sizes[i], ms, per_sec);
     }
+#if defined(__x86_64__)
+    const int syscall_iterations = 1000000;
+    double t0 = now_ms();
+    long sink = 0;
+    for (int i = 0; i < syscall_iterations; i++) sink += raw_getpid();
+    double syscall_ms = now_ms() - t0;
+    printf("\nraw getpid syscall: %.2f ms (%.1f ns/call; sink=%ld)\n", syscall_ms,
+           syscall_ms * 1000000.0 / syscall_iterations, sink);
+#endif
+    printf("pipeline and status experiments (200 commands):\n");
+    double pipeline_ms = time_n_commands(200, "true | true");
+    double chain_ms = time_n_commands(200, "true && true");
+    printf("true | true: %.2f ms (%.0f commands/sec)\n", pipeline_ms, 200000.0 / pipeline_ms);
+    printf("true && true: %.2f ms (%.0f commands/sec)\n", chain_ms, 200000.0 / chain_ms);
     return 0;
 }

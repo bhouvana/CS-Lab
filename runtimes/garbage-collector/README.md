@@ -104,21 +104,21 @@ Real output from `make benchmark`:
 
 ```text
 objects     % live    reps    ms/run
-1000        10        45      0.4444
-1000        50        60      0.3333
-1000        90        38      0.5526
+1000        10        85      0.2353
+1000        50        73      0.2740
+1000        90        59      0.3390
 10000       10        7       3.1429
-10000       50        7       3.0000
-10000       90        7       2.8571
-100000      10        1       27.0000
-100000      50        2       26.0000
-100000      90        1       32.0000
+10000       50        8       2.5000
+10000       90        5       4.6000
+100000      10        1       28.0000
+100000      50        1       27.0000
+100000      90        1       34.0000
 ```
 
 ## Results
 
-Collection time scales linearly with heap size (~0.4-0.5ms at 1,000
-objects, ~3ms at 10,000, ~27-32ms at 100,000 — roughly 10x time per
+Collection time scales linearly with heap size (~0.2-0.3ms at 1,000
+objects, ~2.5-4.6ms at 10,000, ~27-34ms at 100,000 — roughly 10x time per
 10x objects), as expected: mark-and-sweep does O(live objects) work in
 the mark phase and O(total objects) work in the sweep phase, both
 linear. The live/garbage ratio barely matters at a given heap size —
@@ -155,16 +155,46 @@ now specifically guards against it recurring.
   not the default `make test` — see `os/allocator`'s README for why
   (this repo's MinGW/Windows toolchain has no ASan/UBSan runtime).
 
-## Further experiments
+## Additional experiments
 
-- Add a generational split (a "young" set collected far more
-  frequently) and measure the reduction in total work versus always
-  collecting the whole heap.
-- Implement simple reference counting alongside mark-and-sweep and
-  demonstrate the exact cycle it can't collect (this lab's own
-  `test_cycle_does_not_infinite_loop_edge_case` scenario) failing
-  under refcounting.
-- Add a compacting sweep phase (move live objects together, update
-  references) and measure its effect on `os/allocator`-style
-  fragmentation if this GC managed a real arena instead of just
-  calling `free()`.
+`src/further_experiments.c` implements the three follow-up experiments as
+one deterministic, assertion-backed executable. Run it with
+`make experiments`.
+
+### Generational collection
+
+The accounting model compares a full collection of 9,000 old objects and
+1,000 young objects with a young-only collection. It includes one remembered
+old-to-young reference, so the young collector can find its live young set
+without rescanning every old object.
+
+### Reference counting and cycles
+
+The reference-counting model builds `A <-> B`, releases both outside roots,
+and shows that neither object reaches zero references. Breaking the cycle then
+allows both objects to be released, demonstrating the exact case that
+mark-and-sweep handles and naive reference counting does not.
+
+### Compacting sweep
+
+The arena model fills 64 slots, keeps every other object live, relocates live
+objects to the front, and updates their slot references through a relocation
+table. It measures the same largest-free-run fragmentation metric used by
+`os/allocator`.
+
+Real output from `make experiments`:
+
+```text
+Generational collection
+  full heap work:  19100 objects
+  young-only work: 1101 objects
+  work reduction:  94.2%
+
+Reference counting
+  A <-> B after roots released: 0 objects freed (cycle leaked)
+  after breaking the cycle:     2 objects freed
+
+Compacting sweep
+  before: 32 free slots, largest=1, fragmentation=96.9%
+  after:  32 free slots, largest=32, fragmentation=0.0%
+```

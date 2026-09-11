@@ -188,6 +188,25 @@ static void test_last_exit_overrides_earlier_failure_normal_case(void) {
     printf("ok: exit <code> overrides whatever the previous command returned\n");
 }
 
+static void test_pipeline_normal_case(void) {
+    char out[256];
+    int status = run_shell("printf 'a\\nb\\n' | wc -l\nexit 0\n", out, sizeof(out), NULL);
+    assert(strstr(out, "2") != NULL);
+    assert(status == 0);
+    printf("ok: a two-stage pipeline connects stdout to stdin\n");
+}
+
+static void test_status_expansion_and_chaining_normal_case(void) {
+    char out[256];
+    int status = run_shell("false\necho $?\ntrue && echo and\nfalse && echo no\nfalse || echo or\nexit 0\n", out, sizeof(out), NULL);
+    assert(strstr(out, "1\n") != NULL);
+    assert(strstr(out, "and\n") != NULL);
+    assert(strstr(out, "no\n") == NULL);
+    assert(strstr(out, "or\n") != NULL);
+    assert(status == 0);
+    printf("ok: $? expansion and &&/|| short-circuiting work\n");
+}
+
 static void test_sigint_is_survived_regression(void) {
     // Regression: a shell that doesn't ignore SIGINT dies at its own
     // prompt the moment Ctrl-C is pressed, same failure class as
@@ -254,6 +273,8 @@ int main(void) {
     test_cd_invalid_directory_invalid_case();
     test_eof_without_exit_edge_case();
     test_last_exit_overrides_earlier_failure_normal_case();
+    test_pipeline_normal_case();
+    test_status_expansion_and_chaining_normal_case();
     test_sigint_is_survived_regression();
 
     printf("all tests passed\n");

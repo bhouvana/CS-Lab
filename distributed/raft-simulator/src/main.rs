@@ -17,6 +17,11 @@ fn main() {
         }
     }
 
+    if args.iter().any(|arg| arg == "--experiments") {
+        run_experiments();
+        return;
+    }
+
     let mut cluster = Cluster::new(num_nodes);
     println!("Raft simulator: {num_nodes} nodes\n");
 
@@ -62,4 +67,45 @@ fn main() {
             c.kill(leader);
         }
     }
+}
+
+fn run_experiments() {
+    println!("Seeded timeout experiment (seeds 0..1000)");
+    println!("nodes  timeout collisions  split votes");
+    for nodes in [3, 5, 7] {
+        let mut collisions = 0;
+        let mut split_votes = 0;
+        for seed in 0..1000 {
+            let mut cluster = Cluster::with_seed(nodes, seed);
+            cluster.run(400);
+            collisions += cluster.timeout_collisions;
+            split_votes += cluster.split_vote_count;
+        }
+        println!("{nodes:>5} {collisions:>19} {split_votes:>12}");
+    }
+
+    let mut partitioned = Cluster::new(4);
+    partitioned.partition(&[0, 1], &[2, 3]);
+    partitioned.run(400);
+    println!(
+        "\nPartition experiment (4 nodes split 2/2): leader while partitioned = {:?}",
+        partitioned.leader()
+    );
+    partitioned.heal_partition();
+    partitioned.run(200);
+    println!("leader after healing = {:?}", partitioned.leader());
+
+    let mut compacted = Cluster::new(5);
+    compacted.run(200);
+    for index in 0..100 {
+        assert!(compacted.submit(&format!("x={index}")));
+    }
+    compacted.run(100);
+    let before = compacted.log_storage_len();
+    let commit_index = compacted.nodes[compacted.leader().unwrap()].commit_index;
+    compacted.compact(commit_index);
+    println!(
+        "\nCompaction experiment (100 committed commands): storage before = {before}, after = {}",
+        compacted.log_storage_len()
+    );
 }

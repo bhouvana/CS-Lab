@@ -179,12 +179,35 @@ static void test_simultaneous_disconnects_do_not_crash_server_regression(void) {
     printf("ok: simultaneous disconnects don't crash the server (SIGPIPE regression)\n");
 }
 
+static void test_nick_command_changes_message_prefix(void) {
+    int port = 5606;
+    pid_t server = start_server(port);
+    int a = connect_client(port);
+    int b = connect_client(port);
+    char buf[256];
+    recv_line(a, buf, sizeof(buf));
+
+    send(a, "/nick Ada\n", 10, 0);
+    recv_line(b, buf, sizeof(buf));
+    assert(strstr(buf, "is now Ada") != NULL);
+
+    send(a, "hello\n", 6, 0);
+    recv_line(b, buf, sizeof(buf));
+    assert(strstr(buf, "Ada: hello") != NULL);
+
+    close(a);
+    close(b);
+    stop_server(server);
+    printf("ok: /nick changes the message prefix\n");
+}
+
 int main(void) {
     test_join_broadcast_to_existing_clients_normal_case();
     test_message_broadcasts_to_others_not_sender_normal_case();
     test_disconnect_notifies_remaining_clients_normal_case();
     test_third_client_does_not_see_earlier_private_exchange_edge_case();
     test_simultaneous_disconnects_do_not_crash_server_regression();
+    test_nick_command_changes_message_prefix();
     printf("all tests passed\n");
     return 0;
 }

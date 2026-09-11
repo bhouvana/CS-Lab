@@ -24,6 +24,12 @@ add3:
     add     %rdx, %rax
     ret
 
+/* double add_fp2(double a, double b) -- xmm0, xmm1 -> xmm0 */
+    .global add_fp2
+add_fp2:
+    addsd   %xmm1, %xmm0
+    ret
+
 /* long uses_callee_saved(long a)
  * Clobbers RBX (a callee-saved register), so it must save it on entry
  * and restore it before returning -- that save/restore IS the ABI
@@ -60,12 +66,11 @@ check_rbx_preserved:
  * Spills all three arguments into local stack slots, reloads them,
  * and calls add3 -- demonstrating local variables AND that RSP must
  * stay 16-byte aligned immediately before a CALL even with locals in
- * play. 32 bytes of locals keeps RSP 16-aligned after CALL's implicit
- * push of the 8-byte return address (16 - 8 = 8, plus 32 keeps the
- * arithmetic aligned -- see the README for the full accounting). */
+ * play. The 40-byte allocation accounts for the 8-byte return address
+ * already on the stack at function entry and the 32 bytes of locals. */
     .global sum_three_locals
 sum_three_locals:
-    sub     $32, %rsp
+     sub     $40, %rsp
     mov     %rdi, 0(%rsp)
     mov     %rsi, 8(%rsp)
     mov     %rdx, 16(%rsp)
@@ -73,5 +78,19 @@ sum_three_locals:
     mov     8(%rsp), %rsi
     mov     16(%rsp), %rdx
     call    add3
-    add     $32, %rsp
+    add     $40, %rsp
+    ret
+
+/* void misaligned_printf(double value)
+ * Deliberately calls libc with RSP misaligned to demonstrate the ABI
+ * failure mode. This is an opt-in probe, not part of the normal tests. */
+    .section .rodata
+misaligned_format:
+    .string "%f\n"
+    .text
+    .global misaligned_printf
+misaligned_printf:
+    lea     misaligned_format(%rip), %rdi
+    mov     $1, %eax
+    call    printf@PLT
     ret

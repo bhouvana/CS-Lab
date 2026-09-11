@@ -338,16 +338,29 @@ distance (~500 bytes): useless below it, no further benefit above it.
 
 ## Tiny LSM (`databases/tiny-lsm`)
 
-**Question:** does compaction pay for itself in read cost?
+**Questions:** do per-table Bloom filters and sparse offsets reduce
+missing-key read cost, and does threshold compaction bound that cost?
 
 ```text
-before compact: 75 SSTables, 75 total entries, 50x missing-key get() took 250.230 ms
-after  compact: 1 SSTable (20 live keys), 50x missing-key get() took 12.606 ms
-missing-key lookups were 19.8x faster after compaction
+75 SSTables, 50 missing-key lookups
+sparse index without Bloom filter: 254.403 ms
+Bloom filter enabled:              0.481 ms (529.5x faster)
+
+1 SSTable, 1000 entries, 30 missing-key lookups
+linear scan: 17.981 ms
+sparse index: 3.028 ms (5.9x faster)
+
+threshold=8 SSTables, 20 overwritten keys per round
+round 1: 1 SSTable, 0.006 ms for 20 missing-key gets
+round 8: 8 SSTables, 0.034 ms
+round 9: 1 SSTable, 0.006 ms (automatic compaction)
+round 40: 8 SSTables, 0.033 ms
 ```
 
-Collapsing 75 small, mostly-stale SSTables into 1 made missing-key
-lookups ~20x faster — the concrete payoff for compaction's cost.
+The Bloom filter skipped definite misses across the 75-table workload;
+the sparse index bounded a single-table scan to its nearby 100-entry
+tail; and automatic compaction kept the long-write workload at or below
+8 SSTables, resetting to 1 when the threshold was crossed.
 
 ## TCP Chat (`networking/tcp-chat`)
 

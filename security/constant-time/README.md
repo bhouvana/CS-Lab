@@ -63,6 +63,7 @@ constant_time_compare()     -> time does not depend on that
 - `src/main.c` — a correctness demo (both functions must always agree
   on *whether* two buffers match — only their *timing* differs).
 - `src/bench.c` — the timing experiment.
+- `src/followup.c` — optimized, TCP loopback, and HMAC-token experiments.
 - `tests/test_compare.c` — 7 tests, including that both functions
   agree at every single-byte mismatch position across an 8-byte buffer.
 
@@ -124,6 +125,79 @@ remotely than locally, but not why they're impossible — TLS timing
 attacks recovering secrets over a real network, with all its added
 noise, are a documented category of real attack.
 
+## Follow-up experiment results
+
+### Optimization
+
+The same benchmark built at `-O2` still showed the insecure comparison
+increasing with the matching prefix, although the optimized compiler and
+measurement noise changed the absolute values. One run on this Windows
+machine reported:
+
+```text
+match_len       insecure (ms)   constant-time (ms)
+0               3.00            40.00
+4               10.00           38.00
+8               14.00           38.00
+12              22.00           57.00
+16              24.00           48.00
+20              28.00           39.00
+24              39.00           38.00
+28              40.00           48.00
+31              40.00           48.00
+32              94.00           78.00
+```
+
+The full-match row is an optimization artifact in this run, not evidence
+that optimized constant-time code is automatically safe. The target is
+`make benchmark-opt`.
+
+### TCP loopback
+
+`src/followup.c` sends each 32-byte digest over a local TCP connection and
+waits for one response byte, repeating each row 200 times. One run reported:
+
+```text
+mode             match_len       elapsed (ms)
+insecure         0               8.00
+insecure         8               7.00
+insecure         16              7.00
+insecure         24              8.00
+insecure         32              7.00
+constant-time    0               9.00
+constant-time    8               8.00
+constant-time    16              8.00
+constant-time    24              16.00
+constant-time    32              9.00
+```
+
+The loopback round-trip is much noisier than the in-process benchmark and
+does not show a reliable mismatch-position signal in this small sample.
+That is an observation about this transport and sample size, not proof that
+remote timing attacks are impossible.
+
+### HMAC token comparison
+
+The experiment computes an HMAC-SHA-256 token with the repository's existing
+SHA-256 implementation, then compares the resulting 32-byte MAC with the
+insecure and constant-time functions. Across 2,000,000 comparisons per row,
+one run reported:
+
+```text
+match_len       insecure (ms)   constant-time (ms)
+0               7.00            125.00
+8               36.00           139.00
+16              67.00           129.00
+24              97.00           143.00
+32              151.00          128.00
+```
+
+Comparing the fixed-length MAC, rather than the variable-length token
+itself, preserves the usual HMAC verification shape: compute the expected
+MAC, then compare equal-length byte strings with a constant-time function.
+This is an educational implementation and is not a replacement for a
+vetted cryptographic library.
+
 ## Limitations
 
 - **This benchmark does not prove security.** It shows a real,
@@ -143,13 +217,3 @@ noise, are a documented category of real attack.
   speculative execution) are a much larger, harder problem this lab
   doesn't touch at all — this lab is about one specific, easy-to-fix,
   application-level mistake, not the full space of timing side channels.
-
-## Further experiments
-
-- Rebuild at `-O2`/`-O3` and re-run the benchmark to see whether
-  optimization narrows or erases the gap.
-- Measure the same comparison over an actual local TCP round-trip
-  (reusing `networking/tcp-chat`'s socket code) to see how much network
-  jitter narrows the observable signal compared to an in-process call.
-- Implement a real HMAC-based token comparison (naive vs.
-  constant-time) and repeat the experiment on token-length secrets.

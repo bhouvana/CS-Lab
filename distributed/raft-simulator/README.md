@@ -73,9 +73,9 @@ tick 400: node 1 becomes LEADER for term 2
 ## Implementation
 
 - `src/lib.rs` — `Cluster`, `Node`, the whole Raft state machine.
-- `src/main.rs` — CLI: the leader-failure scenario, then the recovery
-  experiment.
-- `tests/tests.rs` — 8 tests: a leader emerges, exactly one leader
+- `src/main.rs` — CLI: the leader-failure scenario, recovery experiment,
+  and the three follow-up experiments (`--experiments`).
+- `tests/tests.rs` — 11 tests: a leader emerges, exactly one leader
   exists at a time, killing the leader triggers a new election with a
   higher term, a submitted command commits and replicates to a
   majority, submitting with no leader fails, a minority partition
@@ -132,6 +132,55 @@ the next-lowest-ID survivor's deadline is always exactly 10 ticks
 later than the previous leader's was, since deadlines are assigned
 `150 + id * 10`.
 
+## Follow-up experiment results
+
+Run the measured suite with:
+
+```bash
+cargo run --release -- --experiments
+```
+
+### Seeded randomized timeouts
+
+The simulator now supports seeded election timeouts in the range 150--200
+ticks. Across seeds `0..1000`, the release run reported:
+
+```text
+nodes  timeout collisions  split votes
+  3                  34            0
+  5                  57            0
+  7                  71            0
+```
+
+Larger clusters had more same-tick timeout collisions in this sample. No
+true split vote occurred because simulated vote requests are synchronous:
+the first candidate processed in a tick contacts every reachable voter
+before another timed-out candidate is processed. The zero is therefore a
+useful transport limitation result, not evidence that randomized Raft
+timeouts never split votes on a real network.
+
+### Network partition
+
+The experiment partitions a four-node cluster into two groups of two for
+400 ticks, then heals the links and runs for 200 more ticks:
+
+```text
+leader while partitioned = None
+leader after healing = Some(0)
+```
+
+Neither side can reach the global majority of three while partitioned. Once
+links are restored, node 0 wins deterministically because the default
+timeouts remain staggered.
+
+### Log compaction
+
+After 100 committed commands in a five-node cluster, the retained log-entry
+count was 500 before compaction and 0 after compacting through the commit
+index. Compaction keeps the snapshot index and term, so future replication
+continues to use absolute Raft indices while old entries no longer occupy
+log storage.
+
 ## What I learned
 
 My first version of the "experiment" swept cluster size (3, 5, 7, 9,
@@ -150,25 +199,13 @@ before trusting its output.
 
 ## Limitations
 
-- **Deterministic timeouts, not randomized ones** — real Raft
-  deliberately randomizes election timeouts to make split votes rare;
-  this simulator's staggered timeouts make split votes essentially
-  impossible to observe, trading that realism for full reproducibility.
-- **No network partitions** (nodes are only "alive" or "killed," not
-  "can talk to some nodes but not others") — a harder and more
-  interesting failure mode real Raft implementations must handle.
-- **No log compaction/snapshotting** — logs grow unboundedly.
+- **Default timeouts are deterministic** — seeded randomized timeouts are
+  available for experiments, but the default CLI remains reproducible.
+- **Synchronous message delivery** — links can be partitioned, but there is
+  no delay, reordering, or dropped-message simulation within a link.
+- **Compaction is local snapshot metadata only** — there is no serialized
+  snapshot transfer to a follower that has fallen behind the compacted
+  prefix.
 - **No persistence** — a "killed" node's state (that it hasn't lost,
   since `kill` doesn't clear it) survives in memory only because this
   is one process; a real crash would need to reload persisted state.
-
-## Further experiments
-
-- Add randomized election timeouts (seeded, for reproducible-but-random
-  runs) and measure how often split votes actually occur at different
-  cluster sizes.
-- Simulate a network partition (some nodes can message each other but
-  not others) instead of only total node failure, and observe what
-  happens when no side has a majority.
-- Add log compaction and measure log size over a long run of
-  `submit()` calls with and without it.

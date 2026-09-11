@@ -77,57 +77,105 @@ fn run_stats(dir: &str) -> std::io::Result<()> {
 /// SSTables are full of now-stale duplicates), then times get() before
 /// and after compact().
 fn run_experiment() -> std::io::Result<()> {
-    let dir = std::env::temp_dir().join(format!("tiny-lsm-experiment-{}", process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    run_bloom_experiment()?;
+    run_sparse_index_experiment()?;
+    run_automatic_compaction_experiment()?;
+    Ok(())
+}
 
-    let num_keys = 20;
-    let overwrites_per_key = 15; // each overwrite is a fresh WAL+memtable entry
-
+fn run_bloom_experiment() -> std::io::Result<()> {
+    let dir = experiment_dir("bloom");
     let mut lsm = Lsm::open(&dir)?;
-    lsm.memtable_limit = 4; // small on purpose: forces many small SSTables
-    for round in 0..overwrites_per_key {
-        for k in 0..num_keys {
-            lsm.put(&format!("key{k}"), &format!("value-round{round}"))?;
+    populate_duplicate_tables(&mut lsm, 20, 15)?;
+    let iterations = 50;
+    let sparse_ms = time_gets(&lsm, iterations, Lsm::get_sparse)?;
+    let filtered_ms = time_gets(&lsm, iterations, Lsm::get)?;
+    println!("Experiment 1: Bloom filters for missing-key reads");
+    println!("{} SSTables, {iterations} missing-key lookups", lsm.sstable_count());
+    println!("sparse index without Bloom filter: {sparse_ms:.3} ms");
+    println!("Bloom filter enabled:              {filtered_ms:.3} ms");
+    println!(
+        "Bloom-filter speedup: {:.1}x\n",
+        if filtered_ms > 0.0 {
+            sparse_ms / filtered_ms
+        } else {
+            0.0
         }
-    }
-    lsm.flush()?; // flush whatever's left in the memtable
-
-    let sstables_before = lsm.sstable_count();
-    // A MISSING key is the worst case for a scan-every-table read
-    // path: it can't short-circuit early, so it has to check every
-    // SSTable (and, before compaction, most of them hold nothing but
-    // now-stale duplicates of the same 20 keys).
-    let missing_key_lookups = 50;
-    let before_ms = time_missing_key_gets(&lsm, missing_key_lookups)?;
-
-    let (tables_before, keys_after) = lsm.compact()?;
-    let after_ms = time_missing_key_gets(&lsm, missing_key_lookups)?;
-
-    println!("Experiment: does compaction pay for itself in read cost?\n");
-    println!("{num_keys} keys, each overwritten {overwrites_per_key} times, memtable_limit=4");
-    println!("(measuring a MISSING key's lookup cost -- the worst case: every SSTable must be checked)\n");
-    println!(
-        "before compact: {sstables_before} SSTables, {tables_before} total entries on disk, \
-         {missing_key_lookups}x missing-key get() took {before_ms:.3} ms"
     );
-    println!(
-        "after  compact: 1 SSTable ({keys_after} live keys), \
-         {missing_key_lookups}x missing-key get() took {after_ms:.3} ms"
-    );
-    println!(
-        "\nmissing-key lookups were {:.1}x {} after compaction",
-        if after_ms > 0.0 { before_ms / after_ms } else { 0.0 },
-        if before_ms >= after_ms { "faster" } else { "slower" }
-    );
-
     let _ = std::fs::remove_dir_all(&dir);
     Ok(())
 }
 
-fn time_missing_key_gets(lsm: &Lsm, iterations: usize) -> std::io::Result<f64> {
+fn run_sparse_index_experiment() -> std::io::Result<()> {
+    let dir = experiment_dir("sparse-index");
+    let mut lsm = Lsm::open(&dir)?;
+    let entries = 1_000;
+    lsm.memtable_limit = entries;
+    for i in 0..entries {
+        lsm.put(&format!("key-{i:05}"), &format!("value-{i}"))?;
+    }
+    let iterations = 30;
+    let linear_ms = time_gets(&lsm, iterations, Lsm::get_linear)?;
+    let sparse_ms = time_gets(&lsm, iterations, Lsm::get_sparse)?;
+    println!("Experiment 2: sparse in-file index");
+    println!("1 SSTable, {entries} entries, {iterations} missing-key lookups");
+    println!("linear scan: {linear_ms:.3} ms");
+    println!("sparse index (one offset per 100 entries): {sparse_ms:.3} ms");
+    println!(
+        "sparse-index speedup: {:.1}x\n",
+        if sparse_ms > 0.0 { linear_ms / sparse_ms } else { 0.0 }
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
+fn run_automatic_compaction_experiment() -> std::io::Result<()> {
+    let dir = experiment_dir("automatic-compaction");
+    let mut lsm = Lsm::open(&dir)?;
+    lsm.memtable_limit = 20;
+    lsm.auto_compact_threshold = Some(8);
+    let checkpoints = [1, 8, 9, 16, 24, 40];
+    println!("Experiment 3: automatic compaction threshold");
+    println!("threshold=8 SSTables, 20 overwritten keys per round");
+    println!("round  SSTables  20x missing-key gets (ms)");
+    for round in 1..=40 {
+        for key in 0..20 {
+            lsm.put(&format!("key-{key}"), &format!("round-{round}"))?;
+        }
+        if checkpoints.contains(&round) {
+            let lookup_ms = time_gets(&lsm, 20, Lsm::get)?;
+            println!("{round:>5}  {:>8}  {lookup_ms:>27.3}", lsm.sstable_count());
+        }
+    }
+    println!();
+    let _ = std::fs::remove_dir_all(&dir);
+    Ok(())
+}
+
+fn experiment_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("tiny-lsm-{name}-{}", process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+fn populate_duplicate_tables(lsm: &mut Lsm, num_keys: usize, rounds: usize) -> std::io::Result<()> {
+    lsm.memtable_limit = 4;
+    for round in 0..rounds {
+        for key in 0..num_keys {
+            lsm.put(&format!("key-{key}"), &format!("round-{round}"))?;
+        }
+    }
+    lsm.flush()
+}
+
+fn time_gets(
+    lsm: &Lsm,
+    iterations: usize,
+    get: fn(&Lsm, &str) -> std::io::Result<Option<String>>,
+) -> std::io::Result<f64> {
     let start = Instant::now();
     for _ in 0..iterations {
-        lsm.get("this-key-was-never-written")?;
+        get(lsm, "this-key-was-never-written")?;
     }
     Ok(start.elapsed().as_secs_f64() * 1000.0)
 }

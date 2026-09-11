@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 static int client_fds[MAX_CLIENTS];
+static char client_names[MAX_CLIENTS][32];
 
 // Sends `msg` to every connected client except `exclude_fd` (pass -1
 // to exclude none, e.g. for a disconnect notice).
@@ -85,6 +86,7 @@ int main(int argc, char** argv) {
                     close(client_fd);
                 } else {
                     client_fds[slot] = client_fd;
+                    snprintf(client_names[slot], sizeof(client_names[slot]), "client %d", slot);
                     printf("client %d connected (fd=%d)\n", slot, client_fd);
                     fflush(stdout);
                     char msg[64];
@@ -109,8 +111,22 @@ int main(int argc, char** argv) {
                 broadcast(-1, msg, (size_t)m);
             } else {
                 buf[n] = '\0';
+                if (strncmp(buf, "/nick ", 6) == 0) {
+                    char* name = buf + 6;
+                    name[strcspn(name, "\r\n")] = '\0';
+                    size_t name_len = strlen(name);
+                    if (*name != '\0' && name_len < sizeof(client_names[i])) {
+                        char old_name[sizeof(client_names[i])];
+                        memcpy(old_name, client_names[i], sizeof(old_name));
+                        memcpy(client_names[i], name, name_len + 1);
+                        char notice[128];
+                        int m = snprintf(notice, sizeof(notice), "*** %s is now %s ***\n", old_name, client_names[i]);
+                        broadcast(-1, notice, (size_t)m);
+                    }
+                    continue;
+                }
                 char out[BUF_SIZE + 32];
-                int m = snprintf(out, sizeof(out), "client %d: %s", i, buf);
+                int m = snprintf(out, sizeof(out), "%s: %s", client_names[i], buf);
                 broadcast(client_fds[i], out, (size_t)m);
             }
         }

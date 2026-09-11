@@ -43,9 +43,11 @@ put(key, value)
     merge              all SSTables -> one, duplicates resolved by recency
 ```
 
-`get(key)` checks the memtable first, then every SSTable from newest
-to oldest — the first match wins, since a key can exist in several
-SSTables with the newest value being current.
+`get(key)` checks the memtable first, then SSTables from newest to
+oldest — the first match wins, since a key can exist in several
+SSTables with the newest value being current. Each SSTable has a
+Bloom filter to skip definite misses and a sparse offset index to
+avoid scanning its entire sorted file.
 
 ## How it works
 
@@ -63,19 +65,23 @@ SSTables with the newest value being current.
   `BTreeMap` (so a later table's value for a duplicate key naturally
   overwrites an earlier one), then writes that single merged map out
   as the new (and only) SSTable, deleting the old files.
+- **Automatic compaction**: setting `auto_compact_threshold` makes a
+  flush compact the store when the SSTable count crosses that threshold.
 - **No SQL, no transactions, no query engine** — a single `put`/`get`
   key-value API, by design (CS-LAB.md §19).
 
 ## Implementation
 
-- `src/lib.rs` — `Lsm`: open/put/get/flush/compact, plus the binary
-  entry format shared by both the WAL and SSTables.
-- `src/main.rs` — CLI, plus the compaction experiment (run with no
+- `src/lib.rs` — `Lsm`: open/put/get/flush/compact, per-SSTable Bloom
+  filters and sparse indexes, plus the binary entry format shared by
+  both the WAL and SSTables.
+- `src/main.rs` — CLI, plus the three experiments (run with no
   arguments — see CONTRIBUTING.md's Rust-lab convention).
-- `tests/tests.rs` — 9 tests: put/get, overwrite semantics, automatic
+- `tests/tests.rs` — 11 tests: put/get, overwrite semantics, automatic
   flush at the memtable limit, reading from a flushed SSTable, newest-
   table-wins for a duplicate key, WAL crash recovery, compaction
-  (merges + keeps latest value), and compacting an empty store.
+  (merges + keeps latest value), compacting an empty store, indexed
+  reads, and threshold-triggered compaction.
 
 ## Example
 
@@ -93,68 +99,55 @@ SSTables:         0
 
 ## Experiments
 
-**Does compaction pay for itself in read cost?** `cargo run --release`
-(no args) writes 20 keys, each overwritten 15 times with a tiny
-`memtable_limit` of 4 — producing 75 small SSTables, almost all of
-them full of now-stale duplicate values. It then times 50 lookups of a
-**missing** key (the worst case for a scan-every-table read path,
-since it can't short-circuit on a hit) before and after `compact()`.
+Running `cargo run --release` (no args) runs all three experiments.
+Missing-key lookups are used because they cannot short-circuit on a
+hit and therefore expose the cost of reading unnecessary data.
 
 Real output:
 
 ```text
-20 keys, each overwritten 15 times, memtable_limit=4
-(measuring a MISSING key's lookup cost -- the worst case: every SSTable must be checked)
+Experiment 1: Bloom filters for missing-key reads
+75 SSTables, 50 missing-key lookups
+sparse index without Bloom filter: 254.403 ms
+Bloom filter enabled:              0.481 ms
+Bloom-filter speedup: 529.5x
 
-before compact: 75 SSTables, 75 total entries on disk, 50x missing-key get() took 250.230 ms
-after  compact: 1 SSTable (20 live keys), 50x missing-key get() took 12.606 ms
+Experiment 2: sparse in-file index
+1 SSTable, 1000 entries, 30 missing-key lookups
+linear scan: 17.981 ms
+sparse index (one offset per 100 entries): 3.028 ms
+sparse-index speedup: 5.9x
 
-missing-key lookups were 19.8x faster after compaction
+Experiment 3: automatic compaction threshold
+threshold=8 SSTables, 20 overwritten keys per round
+round  SSTables  20x missing-key gets (ms)
+    1         1                        0.006
+    8         8                        0.034
+    9         1                        0.006
+   16         8                        0.027
+   24         8                        0.036
+   40         8                        0.033
 ```
 
-## Results
+## Results and lessons
 
-Compaction made missing-key lookups **~20x faster** — collapsing 75
-small files (most holding stale duplicates of just 20 real keys, ~300
-total on-disk entries) into 1 file with the 20 live keys cuts both the
-number of file opens per lookup and the total bytes scanned. This is
-the concrete payoff for compaction's cost: without it, write-heavy
-workloads accumulate SSTables indefinitely and every read (especially
-a miss) gets slower over time; compaction trades some background I/O
-now for bounded read cost later.
-
-## What I learned
-
-My first version of this experiment measured lookups of the 20 *known*
-keys, and the speedup was a modest 1.3x — because every one of those
-keys' current values lived in one of the most-recently-flushed
-SSTables, which `get()` checks first (newest-to-oldest), so the
-existing 75-table scan was already short-circuiting quickly for hits.
-Switching to a *missing* key — which can never short-circuit and must
-exhaust every SSTable — is what actually exercised the cost compaction
-is supposed to fix, and the 20x number is the honest result.
+The Bloom filter was the largest win in this workload: it skipped all
+75 definite misses and made lookups 529.5x faster than the sparse scan
+without a filter. The sparse index made a single-table miss 5.9x faster
+by starting near the target's sorted-file position instead of offset
+zero. Automatic compaction kept the table count bounded at 8; crossing
+the threshold compacted 9 tables back to 1, keeping missing-key latency
+near 0.03 ms over 40 overwrite rounds instead of allowing an unbounded
+table scan.
 
 ## Limitations
 
-- No bloom filters — a real LSM engine (and this repo's own
-  `algorithms/bloom-filter`) would use one per SSTable specifically to
-  make a missing-key lookup skip tables that provably don't contain
-  the key, without reading them at all.
 - No leveled/tiered compaction strategy — this lab does one
   "merge everything into one file" compaction, not RocksDB-style
   incremental leveled compaction.
 - No deletes/tombstones (per CS-LAB.md §19's scope) — only `put`/`get`.
 - Keys and values are both `String` for simplicity, not arbitrary bytes.
-- SSTable lookups are a linear scan — no in-file index or sparse key
-  offsets, so even a single SSTable's lookup cost is O(entries).
-
-## Further experiments
-
-- Add a bloom filter per SSTable (reusing `algorithms/bloom-filter`'s
-  approach) and re-measure the missing-key benchmark — most SSTables
-  should then be skippable without reading them at all.
-- Add a sparse in-file index (e.g. an offset every 100 entries) and
-  measure the improvement to a single SSTable's lookup cost.
-- Trigger compaction automatically once SSTable count crosses a
-  threshold, instead of only on an explicit `compact()` call, and
-  measure the resulting read-latency curve over a long write workload.
+- Bloom filters and sparse indexes are rebuilt in memory when opening
+  an SSTable; they are not persisted as separate metadata files.
+- The sparse index uses one offset every 100 entries, so a lookup still
+  scans a bounded tail of the table rather than doing a binary search.

@@ -7,22 +7,26 @@ meaning on Windows or macOS.
 
 ## What is this?
 
-Direct Linux system calls, hand-written in assembly: `write` and
+Direct Linux system calls, hand-written in assembly: `read`, `write`,
+`getpid`, and
 `exit`, without going through libc's `write()`/`exit()` at any point.
 Includes a complete `-nostdlib` program whose entry point is a raw
 `_start` written in assembly — no libc, no C runtime, at all.
 
 ```bash
 make build
-./hello_nolibc   # zero libc, zero C runtime — a bare ELF entry point
-./demo           # C program using the hand-written syscall wrappers
+ 73.19    0.060438          30      2001           write
+ 26.81    0.022142          22      1000           getpid
+------ ----------- ----------- --------- --------- ----------------
+100.00    0.082580          27      3001           total
 ```
 
-## Why does it matter?
-
-Every "hello world" goes through `write()`, and `write()` eventually
-becomes exactly this: a magic number in RAX, arguments in a few other
-registers, and a `syscall` instruction that hands control to the
+This trace was collected with `SYSCALL_BENCH_ITERATIONS=1000` on the
+WSL Ubuntu environment named at the top of this file. The extra write
+is the benchmark's final buffered `printf` output; the syscall calls
+themselves account for 1,000 `getpid` calls and 2,000 one-byte writes.
+The exact timing is kernel/filesystem dependent; run
+`make strace-benchmark` for a fresh measurement.
 kernel. Seeing that path with nothing else in between — no libc
 buffering, no wrapper doing errno translation — makes "user space" and
 "kernel space" into two sides of one visible instruction instead of an
@@ -49,10 +53,12 @@ register arguments     RAX=syscall number, RDI/RSI/RDX/R10/R8/R9=args
 
 ## How it works
 
-- **`src/syscalls.S`**: `my_write`/`my_exit`, two tiny wrappers. Since
-  `write`'s first 3 arguments and the C calling convention's first 3
+- **`src/syscalls.S`**: `my_read`/`my_write`/`my_getpid`/`my_exit`, tiny
+  wrappers. Since `read` and `write`'s first 3 arguments and the C calling convention's first 3
   argument registers happen to coincide (RDI, RSI, RDX), these barely
   move anything — load the syscall number into RAX, `syscall`, `ret`.
+- **`src/cat.c`**: a byte-for-byte stdin-to-stdout copier using only
+  `my_read`, `my_write`, and `my_exit` for I/O and termination.
 - **`src/hello_nolibc.S`**: a complete program with **no libc and no C
   runtime at all**. `_start` (not `main`) is the literal entry point
   the kernel jumps to; built with `-nostdlib -static` so nothing else
@@ -68,8 +74,9 @@ register arguments     RAX=syscall number, RDI/RSI/RDX/R10/R8/R9=args
 - `src/syscalls.S` — the syscall wrappers.
 - `src/hello_nolibc.S` — the standalone, libc-free program.
 - `src/main.c` — a C program driving the wrappers.
-- `src/bench.c` — the syscall-overhead experiment.
-- `tests/test_syscalls.c` — 5 tests: writing to a real file (verified
+- `src/cat.c` — the raw-syscall byte copier.
+- `src/bench.c` — the syscall-workload experiment.
+- `tests/test_syscalls.c` — 6 tests: reading from a pipe, writing to a real file (verified
   by reading it back), zero-byte write, invalid fd (raw `-EBADF`), a
   closed fd, and `my_exit`'s real exit status via `fork`+`waitpid`
   (since calling it directly would end the test process).
@@ -90,47 +97,80 @@ $ echo $?
 7
 ```
 
-`make objdump` shows the entire compiled body of both wrappers:
+`make objdump` shows the entire compiled body of the wrappers:
 
 ```text
-0000000000001219 <my_write>:
-    1219:	mov    $0x1,%rax
-    1220:	syscall
-    1222:	ret
+0000000000001219 <my_read>:
+  1219:\tmov    $0x0,%rax
+  1220:\tsyscall
+  1222:\tret
 
-0000000000001223 <my_exit>:
-    1223:	mov    $0x3c,%rax
-    122a:	syscall
+0000000000001223 <my_write>:
+  1223:\tmov    $0x1,%rax
+  122a:\tsyscall
+  122c:\tret
+
+000000000000122d <my_exit>:
+  122d:\tmov    $0x3c,%rax
+  1234:\tsyscall
 ```
 
-Three and two instructions. That's the entire "user program -> kernel"
-path this lab set out to make visible.
+The read, write, and getpid wrappers are three instructions each; exit
+is two because it never returns. That's the entire "user program ->
+kernel" path this lab set out to make visible.
 
 ## Experiments
 
-**How much does crossing into the kernel actually cost, compared to a
-plain userspace call?** `src/bench.c` runs 1 million iterations of
-`my_write` to `/dev/null` against 1 million iterations of a trivial
-no-syscall function call.
+**How much does crossing into the kernel cost, and how much does the
+kernel work matter?** `src/bench.c` runs 1 million iterations each of
+`my_getpid`, `my_write` to `/dev/null`, `my_write` to a real file, and a
+trivial no-syscall function call. The real-file loop writes one million
+bytes and deletes the temporary file before exiting.
 
 Real output from `make benchmark`:
 
 ```text
-my_write(devnull, ...):    130.75 ms  (130.8 ns/call)
-noop_call (no syscall):      0.24 ms  (0.2 ns/call)
-ratio: syscall is 534x the cost of a plain call
+Benchmark: syscall cost by kernel workload (1000000 iterations)
+
+my_getpid (no arguments):    112.74 ms  (112.7 ns/call)
+my_write(devnull, ...):    156.14 ms  (156.1 ns/call)
+my_write(real file, ...):  9420.28 ms  (9420.3 ns/call)
+noop_call (no syscall):      0.30 ms  (0.3 ns/call)
+getpid/write(devnull) ratio: 0.72x
+write(real file)/write(devnull) ratio: 60.33x
+write(devnull)/noop ratio: 512x
+sink (ignore): 1000000
 ```
 
 ## Results
 
-A syscall costs **~534x** a plain userspace function call in this
-measurement — about 131ns vs. 0.2ns. That's the real, measurable cost
-of a context switch into the kernel and back (privilege level change,
-kernel-side validation of the file descriptor and buffer, and the
-return trip), even for `/dev/null`, the cheapest possible destination.
-This is exactly why libc's `stdio` buffers output instead of calling
-`write()` per byte or per line — batching amortizes this fixed cost
-over many bytes.
+On this run, `getpid` was **112.7ns** and a one-byte `/dev/null` write
+was **156.1ns**, while the one-byte real-file write was **9420.3ns**.
+The real file was **60.33x** slower than `/dev/null`, showing that the
+fixed kernel-entry cost is only part of the total. The `/dev/null` write
+was **512x** the plain call baseline. These timings are one run on the
+WSL Ubuntu environment named at the top of this file, not universal
+constants.
+
+The short `make strace-benchmark` target repeats the same benchmark with
+`SYSCALL_BENCH_ITERATIONS=1000`, so `strace -c` can finish without
+tracing a million disk writes:
+
+```text
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+ 56.75    0.056670          28      2001           write
+ 43.25    0.043186          43      1000           getpid
+------ ----------- ----------- --------- --------- ----------------
+100.00    0.099856          33      3001           total
+```
+
+This trace was collected with `SYSCALL_BENCH_ITERATIONS=1000` on the
+WSL Ubuntu environment named at the top of this file. The extra write
+is the benchmark's final buffered `printf` output; the syscall calls
+themselves account for 1,000 `getpid` calls and 2,000 one-byte writes.
+The exact timing is kernel/filesystem dependent; run
+`make strace-benchmark` for a fresh measurement.
 
 ## What I learned
 
@@ -148,22 +188,11 @@ quietly doing for you that you now have to do yourself.
 
 ## Limitations
 
-- Only `write` and `exit` — no `read`, `open`, or `mmap`, though the
-  same three-instruction pattern extends directly to any syscall that
+- Only `read`, `write`, `getpid`, and `exit` — no `open` or `mmap`, though the
+  same three-instruction pattern extends directly to other syscalls that
   needs no argument marshaling.
 - No `vDSO` discussion — some syscalls (`gettimeofday`, `clock_gettime`)
   are actually served from userspace via the vDSO for speed, which
   this lab's straightforward `syscall`-instruction model doesn't cover.
 - x86-64 only; ARM64 Linux uses a different instruction (`svc #0`) and
   different syscall numbers entirely.
-
-## Further experiments
-
-- Add `my_read` and build a byte-for-byte `cat` using only the three
-  wrappers, no libc I/O at all.
-- Measure syscall overhead across different syscalls (`getpid` — no
-  arguments, minimal kernel work — vs. `write` to a real file) to see
-  how much of the 534x is the context switch itself vs. actual kernel
-  work.
-- Compare this repo's raw-syscall numbers against `strace -c`'s own
-  per-syscall timing on the same workload.

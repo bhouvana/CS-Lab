@@ -9,7 +9,7 @@ UNAME_S := $(shell uname -s)
 CC := gcc
 CFLAGS := -Wall -Wextra -O2
 
-.PHONY: build test benchmark clean objdump
+.PHONY: build test benchmark perf misaligned test-asan clean objdump
 
 ifeq ($(UNAME_S),Linux)
 
@@ -24,11 +24,24 @@ demo_test: tests/test_calling_convention.c src/math.S
 demo_bench: src/bench.c src/math.S
 	$(CC) $(CFLAGS) src/bench.c src/math.S -o demo_bench
 
+misaligned_probe: src/misaligned.c src/math.S
+	$(CC) $(CFLAGS) src/misaligned.c src/math.S -o misaligned_probe
+
 test: demo_test
 	./demo_test
 
 benchmark: demo_bench
 	./demo_bench
+
+perf: demo_bench
+	@if command -v perf >/dev/null 2>&1; then perf stat -e cycles,instructions,branches,branch-misses ./demo_bench; else echo "skip: perf is not installed in this Linux environment"; fi
+
+misaligned: misaligned_probe
+	@./misaligned_probe || { status=$$?; echo "misaligned probe exited with status $$status (expected on libc implementations that use aligned SSE stack accesses)"; }
+
+test-asan: tests/test_calling_convention.c src/math.S
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -g tests/test_calling_convention.c src/math.S -o demo_test_asan -lm
+	./demo_test_asan
 
 # CS-LAB.md §26: always include an objdump/gcc -S example. Compares
 # our hand-written add2 against what the compiler generates for the
@@ -48,4 +61,4 @@ build test benchmark objdump:
 endif
 
 clean:
-	rm -f demo demo_test demo_bench
+	rm -f demo demo_test demo_bench demo_test_asan misaligned_probe

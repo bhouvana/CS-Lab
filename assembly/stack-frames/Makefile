@@ -9,7 +9,7 @@ CC := gcc
 CFLAGS := -O0 -g -fno-omit-frame-pointer -Wall -Wextra
 PYTHON := python3
 
-.PHONY: build test benchmark clean objdump
+.PHONY: build test benchmark experiments clean objdump
 
 ifeq ($(UNAME_S),Linux)
 
@@ -22,9 +22,14 @@ nested: src/nested.c
 
 test: nested
 	$(PYTHON) tests/test_walk_stack.py
+	$(PYTHON) tests/test_further_experiments.py
 
 benchmark: nested
 	$(PYTHON) scripts/frame_size_experiment.py
+	$(PYTHON) scripts/further_experiments.py
+
+experiments: nested
+	$(PYTHON) scripts/further_experiments.py
 
 # CS-LAB.md §26: objdump example -- the real prologue/epilogue GCC
 # generates for each function (push %rbp; mov %rsp,%rbp; ...; leave; ret).

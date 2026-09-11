@@ -118,3 +118,37 @@ fn compact_on_empty_store_is_a_safe_noop_invalid_case() {
     assert_eq!((before, after), (0, 0));
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn bloom_filter_and_sparse_index_preserve_reads() {
+    let dir = scratch_dir("read_acceleration");
+    let mut lsm = Lsm::open(&dir).unwrap();
+    lsm.memtable_limit = 200;
+    for i in 0..200 {
+        lsm.put(&format!("key-{i:03}"), &format!("value-{i}")).unwrap();
+    }
+
+    assert_eq!(lsm.sstable_count(), 1);
+    assert_eq!(lsm.get("key-150").unwrap(), Some("value-150".to_string()));
+    assert_eq!(lsm.get_sparse("key-150").unwrap(), Some("value-150".to_string()));
+    assert_eq!(lsm.get_linear("key-150").unwrap(), Some("value-150".to_string()));
+    assert_eq!(lsm.get("missing").unwrap(), None);
+    assert_eq!(lsm.get_sparse("missing").unwrap(), None);
+    assert_eq!(lsm.get_linear("missing").unwrap(), None);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn automatic_compaction_keeps_latest_values() {
+    let dir = scratch_dir("auto_compact");
+    let mut lsm = Lsm::open(&dir).unwrap();
+    lsm.memtable_limit = 1;
+    lsm.auto_compact_threshold = Some(2);
+    lsm.put("k", "v1").unwrap();
+    lsm.put("k", "v2").unwrap();
+    lsm.put("k", "v3").unwrap();
+
+    assert_eq!(lsm.sstable_count(), 1);
+    assert_eq!(lsm.get("k").unwrap(), Some("v3".to_string()));
+    std::fs::remove_dir_all(&dir).ok();
+}

@@ -9,6 +9,7 @@
 
 typedef struct Block {
     size_t size; // payload capacity in bytes (aligned), NOT including this header
+    size_t requested_size; // caller-requested bytes, used to measure internal waste
     int is_free;
     struct Block *addr_prev, *addr_next; // whole-heap neighbors, in address order (for coalescing)
     struct Block *free_prev, *free_next; // free list links (meaningful only while is_free)
@@ -71,21 +72,35 @@ static void split_block(Block* b, size_t wanted) {
     free_list_push(new_block);
 }
 
-void* my_malloc(size_t size) {
+void* my_malloc_fit(size_t size, AllocatorFit fit) {
     if (size == 0) return NULL;
     if (!heap_head) heap_init();
 
     size_t wanted = align_up(size);
 
+    Block* chosen = NULL;
     for (Block* b = free_head; b != NULL; b = b->free_next) {
-        if (b->size >= wanted) {
-            free_list_remove(b);
-            split_block(b, wanted); // shrinks b->size to `wanted` if it splits
-            b->is_free = 0;
-            return (void*)(b + 1);
+        if (b->size >= wanted &&
+            (chosen == NULL || (fit == ALLOCATOR_BEST_FIT && b->size < chosen->size))) {
+            chosen = b;
         }
     }
+    if (chosen) {
+        free_list_remove(chosen);
+        split_block(chosen, wanted); // shrinks chosen->size to wanted if it splits
+        chosen->requested_size = size;
+        chosen->is_free = 0;
+        return (void*)(chosen + 1);
+    }
     return NULL; // arena exhausted / too fragmented to satisfy this request
+}
+
+void* my_malloc(size_t size) {
+    return my_malloc_fit(size, ALLOCATOR_FIRST_FIT);
+}
+
+void* my_malloc_best_fit(size_t size) {
+    return my_malloc_fit(size, ALLOCATOR_BEST_FIT);
 }
 
 static void coalesce(Block* b) {
@@ -132,7 +147,10 @@ void* my_realloc(void* ptr, size_t size) {
     Block* b = (Block*)ptr - 1;
     size_t wanted = align_up(size);
 
-    if (wanted <= b->size) return ptr; // already big enough; keep it simple, don't shrink-split
+    if (wanted <= b->size) {
+        b->requested_size = size;
+        return ptr; // already big enough; keep it simple, don't shrink-split
+    }
 
     // Try growing in place by absorbing an immediately-following free block.
     if (b->addr_next && b->addr_next->is_free && b->size + sizeof(Block) + b->addr_next->size >= wanted) {
@@ -142,19 +160,20 @@ void* my_realloc(void* ptr, size_t size) {
         b->addr_next = n->addr_next;
         if (b->addr_next) b->addr_next->addr_prev = b;
         split_block(b, wanted);
+        b->requested_size = size;
         return ptr;
     }
 
     // Fall back: allocate elsewhere, copy, free the old block.
     void* new_ptr = my_malloc(size);
     if (!new_ptr) return NULL;
-    memcpy(new_ptr, ptr, b->size < size ? b->size : size);
+    memcpy(new_ptr, ptr, b->requested_size < size ? b->requested_size : size);
     my_free(ptr);
     return new_ptr;
 }
 
 AllocatorStats my_heap_stats(void) {
-    AllocatorStats s = {0, 0, 0, 0, 0, 0.0};
+    AllocatorStats s = {0, 0, 0, 0, 0, 0, 0, 0.0};
     if (!heap_head) heap_init();
     for (Block* b = heap_head; b != NULL; b = b->addr_next) {
         s.num_blocks++;
@@ -164,6 +183,8 @@ AllocatorStats my_heap_stats(void) {
             if (b->size > s.largest_free_block) s.largest_free_block = b->size;
         } else {
             s.allocated_bytes += b->size;
+            s.requested_bytes += b->requested_size;
+            s.internal_fragmentation += b->size - b->requested_size;
         }
     }
     s.fragmentation = s.free_bytes > 0 ? 1.0 - (double)s.largest_free_block / (double)s.free_bytes : 0.0;

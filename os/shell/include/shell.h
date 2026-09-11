@@ -24,6 +24,10 @@ int shell_tokenize(char *line, char **argv, int max_args);
 // matching every real shell's behavior.
 int shell_exec(int argc, char **argv);
 
+// Runs one shell line, including a pipeline and/or a left-to-right &&/||
+// chain. `$?` expands to previous_status before the line is parsed.
+int shell_exec_line(char *line, int previous_status);
+
 // Reads and runs commands from `in` until EOF or a `exit` builtin.
 // Prints "$ " to `out` before each read when `interactive` is non-zero
 // (a real terminal); a piped/redirected stdin never gets a prompt, so

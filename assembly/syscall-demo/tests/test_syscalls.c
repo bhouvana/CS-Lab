@@ -8,7 +8,24 @@
 #include <unistd.h>
 
 extern long my_write(int fd, const void* buf, unsigned long count);
+extern long my_read(int fd, void* buf, unsigned long count);
 extern void my_exit(int status) __attribute__((noreturn));
+
+static void test_read_round_trip_normal_case(void) {
+    int pipe_fds[2];
+    assert(pipe(pipe_fds) == 0);
+    const char msg[] = "raw read";
+    assert(write(pipe_fds[1], msg, sizeof(msg) - 1) == (ssize_t)(sizeof(msg) - 1));
+    close(pipe_fds[1]);
+
+    char buf[sizeof(msg)] = {0};
+    long n = my_read(pipe_fds[0], buf, sizeof(buf) - 1);
+    close(pipe_fds[0]);
+
+    assert(n == (long)(sizeof(msg) - 1));
+    assert(memcmp(buf, msg, sizeof(msg) - 1) == 0);
+    printf("ok: my_read() returns the exact bytes supplied by a pipe\n");
+}
 
 static void test_write_to_real_file_normal_case(void) {
     const char* path = "tests/tmp_syscall_test.txt";
@@ -79,6 +96,7 @@ static void test_exit_status_via_fork_normal_case(void) {
 }
 
 int main(void) {
+    test_read_round_trip_normal_case();
     test_write_to_real_file_normal_case();
     test_write_zero_bytes_edge_case();
     test_write_invalid_fd_returns_raw_negative_errno_invalid_case();

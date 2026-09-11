@@ -3,17 +3,23 @@ UNAME_S := $(shell uname -s)
 CC := gcc
 CFLAGS := -Wall -Wextra -O2 -Iinclude
 
-.PHONY: build test test-asan benchmark clean
+.PHONY: build test test-asan benchmark experiments clean
 
 ifeq ($(UNAME_S),Linux)
 
-build: server client
+build: server client poll_server queue_server
 
 server: src/server.c include/chat.h
 	$(CC) $(CFLAGS) src/server.c -o server
 
 client: src/client.c include/chat.h
 	$(CC) $(CFLAGS) src/client.c -o client
+
+poll_server: src/server_poll.c include/chat.h
+	$(CC) $(CFLAGS) src/server_poll.c -o poll_server
+
+queue_server: src/server_queue.c include/chat.h
+	$(CC) $(CFLAGS) src/server_queue.c -o queue_server
 
 chat_test: tests/test_chat.c include/chat.h
 	$(CC) $(CFLAGS) tests/test_chat.c -o chat_test
@@ -40,6 +46,9 @@ test-asan: server_asan chat_test_asan
 benchmark: server chat_bench
 	./chat_bench
 
+experiments: poll_server queue_server
+	@echo "built poll_server and queue_server"
+
 else
 
 build test test-asan benchmark:
@@ -48,4 +57,4 @@ build test test-asan benchmark:
 endif
 
 clean:
-	rm -f server client chat_test chat_test_asan chat_bench
+	rm -f server client poll_server queue_server chat_test chat_test_asan chat_bench

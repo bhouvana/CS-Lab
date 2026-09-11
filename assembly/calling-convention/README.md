@@ -67,10 +67,11 @@ return value (RAX)
   which part of the ABI it demonstrates.
 - `src/main.c` — calls each one and prints results.
 - `src/bench.c` — the CALL/RET overhead experiment.
+- `src/misaligned.c` — opt-in libc probe for the misaligned-stack failure mode.
 - `examples/add_equivalent.c` — the C source compared against `add2`
   via `make objdump`.
-- `tests/test_calling_convention.c` — 5 tests, including the runtime
-  callee-saved proof.
+- `tests/test_calling_convention.c` — 6 tests, including the runtime
+  callee-saved and floating-point register proofs.
 
 ## Example
 
@@ -114,63 +115,67 @@ cross-file `call`, since GCC can't inline across a `.S` file) against
 inlines at `-O2` — confirmed by disassembling the binary, no `call`
 instruction appears in that loop at all).
 
-Real output from `make benchmark`:
+Measured under Ubuntu WSL 2 with GCC 15.2.0, using two consecutive
+`make benchmark` runs:
 
 ```text
-via add2 (real CALL/RET):            230.93 ms  (1.15 ns/call)
-via add_inline (compiler-inlined):   278.77 ms  (1.39 ns/call)
+run 1: add2 293.75 ms (1.47 ns/call); add_inline 280.80 ms (1.40 ns/call)
+run 2: add2 280.72 ms (1.40 ns/call); add_inline 276.89 ms (1.38 ns/call)
 ```
 
-(Both loops write to a `volatile` accumulator each iteration — this is
-what stops the compiler from optimizing the whole loop away, and it
-turns out to matter a lot; see Results.)
+(The inlined loop was slightly faster in both runs, but the difference
+was only 0.02–0.07 ns/call. Both loops write to a `volatile` accumulator,
+so this remains a small timing experiment rather than an isolated
+measurement of call latency.)
+
+The hardware-counter version is available as `make perf`. It was
+attempted in the same environment, but `perf` is not installed, so no
+retired-instruction or cycle counts are claimed here.
+
+The floating-point experiment adds `add_fp2(double, double)` in
+`src/math.S`. It receives operands in XMM0/XMM1, returns the sum in XMM0,
+and is covered by the normal test target:
+
+```text
+ok: add_fp2 (XMM0/XMM1 floating-point register passing)
+all tests passed
+```
+
+The alignment experiment also corrected `sum_three_locals`: its 40-byte
+frame leaves RSP 16-byte aligned immediately before its nested `call`.
+The opt-in `make misaligned` target deliberately calls libc `printf`
+without that adjustment. On the measured Ubuntu WSL run it printed the
+probe heading and then terminated with `Segmentation fault (core dumped)`
+(status 139), demonstrating why the alignment rule matters. It is not
+part of the normal test target.
 
 ## Results
 
-The real function call is **faster**, not slower — the opposite of
-what the experiment set out to demonstrate, and reproducible across
-repeated runs and with the two loops' order swapped (ruling out
-warm-up bias). The likely explanation: both loops are actually
-bottlenecked by store-to-load forwarding through the `volatile sink`
-variable (the load of `sink` each iteration depends on the *previous*
-iteration's store to it, a serial chain neither version can avoid).
-`add2`'s own arithmetic has no memory dependency, so an out-of-order
-CPU can compute it well ahead of when the result is needed, hiding the
-`call`/`ret` cost entirely behind that unavoidable memory latency. The
-inlined version's instruction sequence apparently schedules slightly
-less favorably around that same bottleneck. Either way, the honest
-takeaway isn't "calls are slower" — it's that at the nanosecond scale,
-what dominates is rarely the thing you'd guess without measuring.
+The inlined version was slightly faster in both measured runs, which is
+consistent with avoiding CALL/RET, but the small and variable gap means
+the benchmark does not isolate that overhead cleanly. The volatile
+accumulator creates a serial load/store dependency in both loops, so
+hardware counters would be the appropriate next measurement; they were
+unavailable in this environment. The floating-point test and the
+misalignment probe provide direct ABI evidence independent of timing.
 
 ## What I learned
 
-I expected the inlined loop to win easily and had a tidy explanation
-ready ("no call/ret overhead"). Measuring first, instead of trusting
-that expectation, is what caught it being backwards — and disassembling
-both loops (confirming `add_inline` really was inlined, no `call`
-present) was necessary to rule out "maybe it just didn't inline" before
-accepting the surprising result as real.
+I expected the inlined loop to win easily, and the measurements were
+consistent with that expectation. The small gap was a useful reminder
+that a volatile accumulator can dominate a microbenchmark, so the
+result should not be presented as a precise CALL/RET cost without
+hardware-counter data.
 
 ## Limitations
 
 - x86-64 System V only — no ARM64 (AAPCS64) comparison, though the
   underlying *concepts* (argument registers, callee-saved set, stack
   alignment) carry over with different register names and rules.
-- Only integer/pointer arguments — no floating-point (XMM0-7) argument
-  passing demonstrated.
-- The benchmark's surprising result is explained by a plausible
-  hypothesis (store-forwarding bottleneck hiding call latency), not
-  confirmed with hardware performance counters (`perf stat`) — a
-  genuine further-experiment candidate, not a settled explanation.
-
-## Further experiments
-
-- Re-run the benchmark under `perf stat` to see actual retired
-  instructions/cycles per loop and test the store-forwarding
-  hypothesis directly.
-- Add a floating-point argument function (XMM0/XMM1 in, XMM0 out) to
-  cover the other half of the System V argument-passing rules.
-- Deliberately misalign the stack before a `call` inside
-  `sum_three_locals` (e.g. push one extra byte's worth) and observe
-  what breaks when calling a real libc function that uses SSE
-  instructions requiring 16-byte alignment.
+- The floating-point coverage is limited to two scalar `double`
+  arguments; vector types and wider XMM register usage are not shown.
+- `perf stat` could not be run because `perf` is not installed in the
+  measured WSL environment.
+- The misalignment probe intentionally crashes on this libc build and
+  must remain opt-in; it is not sanitizer-checked or part of normal
+  tests.

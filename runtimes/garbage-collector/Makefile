@@ -1,7 +1,7 @@
 CC := gcc
 CFLAGS := -std=c11 -Wall -Wextra -Wpedantic -Iinclude -O2
 
-.PHONY: build test test-asan benchmark clean
+.PHONY: build test test-asan benchmark experiments clean
 
 build: gc_demo
 
@@ -28,5 +28,11 @@ test-asan: gc_test_asan
 benchmark: gc_bench
 	./gc_bench
 
+gc_experiments: src/further_experiments.c
+	$(CC) $(CFLAGS) src/further_experiments.c -o gc_experiments
+
+experiments: gc_experiments
+	./gc_experiments
+
 clean:
-	rm -f gc_demo gc_test gc_test_asan gc_bench
+	rm -f gc_demo gc_test gc_test_asan gc_bench gc_experiments

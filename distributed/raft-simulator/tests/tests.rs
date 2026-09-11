@@ -100,3 +100,45 @@ fn revived_node_rejoins_as_a_follower() {
     assert!(cluster.alive[victim]);
     assert_eq!(cluster.nodes[victim].role, Role::Follower);
 }
+
+#[test]
+fn seeded_timeouts_are_reproducible() {
+    let mut first = Cluster::with_seed(5, 42);
+    let mut second = Cluster::with_seed(5, 42);
+    first.run(400);
+    second.run(400);
+    assert_eq!(first.events, second.events);
+    assert_eq!(first.timeout_collisions, second.timeout_collisions);
+}
+
+#[test]
+fn equal_partition_has_no_leader_until_healed() {
+    let mut cluster = Cluster::new(4);
+    cluster.partition(&[0, 1], &[2, 3]);
+    cluster.run(400);
+    assert!(cluster.leader().is_none());
+    cluster.heal_partition();
+    cluster.run(200);
+    assert!(cluster.leader().is_some());
+}
+
+#[test]
+fn compaction_reduces_storage_without_changing_indices() {
+    let mut cluster = Cluster::new(5);
+    cluster.run(200);
+    for index in 0..20 {
+        assert!(cluster.submit(&format!("x={index}")));
+    }
+    cluster.run(100);
+    let leader = cluster.leader().unwrap();
+    let commit_index = cluster.nodes[leader].commit_index;
+    let before = cluster.log_storage_len();
+    cluster.compact(commit_index);
+    assert!(cluster.log_storage_len() < before);
+    assert_eq!(cluster.nodes[leader].commit_index, commit_index);
+    assert_eq!(cluster.nodes[leader].snapshot_index, commit_index);
+    assert!(cluster.submit("after-compaction"));
+    cluster.run(50);
+    let leader = cluster.leader().unwrap();
+    assert_eq!(cluster.nodes[leader].commit_index, commit_index + 1);
+}

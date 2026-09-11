@@ -53,6 +53,30 @@ static void test_split_leaves_remainder_available(void) {
     printf("ok: allocating less than the whole arena splits off the remainder\n");
 }
 
+static void test_best_fit_selects_smallest_suitable_block(void) {
+    my_heap_reset();
+    void* first = my_malloc(64);
+    void* middle = my_malloc(256);
+    void* last = my_malloc(64);
+    my_free(first);
+    my_free(middle);
+    void* best = my_malloc_best_fit(32);
+    assert(best == first);
+    my_free(best);
+    my_free(last);
+    printf("ok: best-fit selects the smallest suitable free block\n");
+}
+
+static void test_stats_report_internal_fragmentation(void) {
+    my_heap_reset();
+    assert(my_malloc(1) != NULL);
+    assert(my_malloc(9) != NULL);
+    AllocatorStats stats = my_heap_stats();
+    assert(stats.requested_bytes == 10);
+    assert(stats.internal_fragmentation == 14);
+    printf("ok: stats report requested bytes and internal fragmentation\n");
+}
+
 static void test_calloc_zeroes_memory_normal_case(void) {
     my_heap_reset();
     unsigned char* p = my_calloc(100, 1);
@@ -120,6 +144,8 @@ int main(void) {
     test_free_then_realloc_same_size_reuses_block();
     test_coalesce_adjacent_free_blocks();
     test_split_leaves_remainder_available();
+    test_best_fit_selects_smallest_suitable_block();
+    test_stats_report_internal_fragmentation();
     test_calloc_zeroes_memory_normal_case();
     test_realloc_grow_preserves_contents();
     test_realloc_null_behaves_like_malloc_edge_case();

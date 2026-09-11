@@ -64,11 +64,11 @@ my_malloc(n)
 - `include/allocator.h` — public API + `AllocatorStats`.
 - `src/allocator.c` — the whole allocator.
 - `src/main.c` — small demo (`make build`).
-- `src/bench.c` — the fragmentation experiment.
-- `tests/test_allocator.c` — 12 tests: allocate, free+reuse, coalesce,
+- `src/bench.c` — fragmentation, fit-policy, internal-waste, and growth experiments.
+- `tests/test_allocator.c` — 14 tests: allocate, free+reuse, coalesce,
   split, calloc, realloc (grow/NULL/zero), alignment, and 3
   invalid/edge cases (`malloc(0)`, `free(NULL)`, an allocation bigger
-  than the whole arena).
+  than the whole arena), plus best-fit selection and fragmentation stats.
 
 ## Example
 
@@ -99,25 +99,43 @@ coalesces).
 Real output from `make benchmark`:
 
 ```text
-Checkerboard (978 blocks x 1024 bytes): free=500848 bytes across 490 blocks, largest=1024 bytes, fragmentation=99.8%
+First-fit checkerboard (970 blocks x 1024 bytes): free=497560 bytes across 486 blocks, largest=1024 bytes, fragmentation=99.8%
   -> request for 3072 contiguous bytes (3 blocks' worth): FAILED (fragmentation, even though total free bytes are enough)
 
-LIFO free order (978 blocks x 1024 bytes): free=1048528 bytes across 1 blocks, largest=1048528 bytes, fragmentation=0.0%
+Best-fit checkerboard (970 blocks x 1024 bytes): free=497560 bytes across 486 blocks, largest=1024 bytes, fragmentation=99.8%
+  -> request for 3072 contiguous bytes (3 blocks' worth): FAILED (fragmentation, even though total free bytes are enough)
+
+First-fit LIFO free order (970 blocks x 1024 bytes): free=1048520 bytes across 1 blocks, largest=1048520 bytes, fragmentation=0.0%
+
+Internal fragmentation (9 varied requests): requested=2014 bytes, allocated capacity=2040 bytes, wasted=26 bytes (1.3%)
+
+Growable arena (64KB start, doubling realloc): checkerboard growths=4, LIFO growths=4
 ```
 
 ## Results
 
-Both runs free exactly half of 978 identical blocks, so both end up
-with roughly the same total free bytes (~500KB checkerboard, the full
+Both fit policies free exactly half of 970 identical blocks, so both
+end up with roughly the same total free bytes (~498KB checkerboard, the full
 arena for LIFO since everything gets freed). The *distribution* of
-that free memory is what differs completely: checkerboard leaves 490
+that free memory is what differs completely: checkerboard leaves 486
 scattered single-block (1024-byte) holes — 99.8% fragmentation — and a
 request for just 3KB contiguous, trivially satisfiable in principle
 given ~500KB free, **fails outright**. LIFO order collapses every
 freed block into its already-free neighbor as it goes, ending at a
 single free block covering the whole arena — 0% fragmentation. This is
 fragmentation made concrete: it's not about *how much* is free, it's
-about whether coalescing ever gets a chance to happen.
+about whether coalescing ever gets a chance to happen. On this uniform
+checkerboard workload, best-fit has the same result as first-fit because
+every candidate hole is the same size.
+
+Internal fragmentation is measured as allocated capacity minus the
+original requested sizes. The varied requests waste 26 bytes, or 1.3%
+of allocated capacity, from 8-byte alignment. The benchmark's growth
+model starts with a 64KB offset arena and doubles it with `realloc` when
+live bytes exceed capacity; both patterns reach the same 1MB peak, so
+both require four growths. Because this model stores offsets rather than
+live pointers, it demonstrates growth frequency without changing the
+fixed-arena allocator's pointer-validity contract.
 
 ## What I learned
 
@@ -134,21 +152,13 @@ of an accidentally-passing one.
 
 - Fixed 1MB arena, no growth (no `sbrk`/`mmap`) — an allocation request
   that doesn't fit simply fails, it never grows the heap.
-- First-fit only — no best-fit or segregated free lists to compare
-  fragmentation behavior against.
+- Best-fit is available for comparison, but the public default remains
+  first-fit.
+- The growable-arena experiment is a benchmark model, not a replacement
+  for the fixed arena; moving a backing allocation would invalidate live
+  pointers in a real allocator.
 - Not thread-safe.
 - `-fsanitize=address,undefined` (per CS-LAB.md §40) is a separate
   `make test-asan` target, not the default `make test`: this repo's
   MinGW/Windows toolchain has no ASan/UBSan runtime libraries. Use
   `test-asan` on Linux/macOS/clang.
-
-## Further experiments
-
-- Implement best-fit and compare its fragmentation against first-fit
-  on the same checkerboard workload.
-- Track and report internal fragmentation (wasted bytes inside
-  allocated blocks from alignment/minimum-split-size rounding), not
-  just external fragmentation.
-- Let the arena grow (simulate `sbrk` by `realloc`-ing the backing
-  array) and measure how often growth is actually needed under each
-  allocation pattern.

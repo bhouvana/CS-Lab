@@ -25,8 +25,10 @@
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+
+const SSTABLE_INDEX_STRIDE: usize = 100;
 
 fn write_entry<W: Write>(w: &mut W, key: &str, value: &str) -> io::Result<()> {
     let (kb, vb) = (key.as_bytes(), value.as_bytes());
@@ -63,12 +65,95 @@ fn read_all_entries(path: &Path) -> io::Result<Vec<(String, String)>> {
     Ok(out)
 }
 
+struct BloomFilter {
+    bits: Vec<u64>,
+    num_bits: usize,
+    num_hashes: usize,
+}
+
+impl BloomFilter {
+    fn for_items(item_count: usize) -> Self {
+        let num_bits = (item_count.max(1) * 10).max(64);
+        BloomFilter {
+            bits: vec![0; num_bits.div_ceil(64)],
+            num_bits,
+            num_hashes: 7,
+        }
+    }
+
+    fn insert(&mut self, item: &str) {
+        for index in self.indices(item) {
+            self.bits[index / 64] |= 1 << (index % 64);
+        }
+    }
+
+    fn contains(&self, item: &str) -> bool {
+        self.indices(item)
+            .iter()
+            .all(|&index| (self.bits[index / 64] >> (index % 64)) & 1 == 1)
+    }
+
+    fn indices(&self, item: &str) -> Vec<usize> {
+        let first = hash64(item.as_bytes(), 0xcbf29ce484222325);
+        let second = hash64(item.as_bytes(), 0x9e3779b97f4a7c15);
+        (0..self.num_hashes)
+            .map(|i| {
+                first
+                    .wrapping_add((i as u64).wrapping_mul(second))
+                    .wrapping_rem(self.num_bits as u64) as usize
+            })
+            .collect()
+    }
+}
+
+fn hash64(data: &[u8], mut hash: u64) -> u64 {
+    for &byte in data {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash = (hash ^ (hash >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    hash = (hash ^ (hash >> 27)).wrapping_mul(0x94d049bb133111eb);
+    hash ^ (hash >> 31)
+}
+
+struct Sstable {
+    path: PathBuf,
+    bloom: BloomFilter,
+    sparse_index: Vec<(String, u64)>,
+}
+
+fn build_sstable_metadata(path: &Path) -> io::Result<Sstable> {
+    let mut reader = BufReader::new(File::open(path)?);
+    let mut keys = Vec::new();
+    let mut sparse_index = Vec::new();
+    loop {
+        let offset = reader.stream_position()?;
+        let Some((key, _)) = read_entry(&mut reader)? else {
+            break;
+        };
+        if keys.len() % SSTABLE_INDEX_STRIDE == 0 {
+            sparse_index.push((key.clone(), offset));
+        }
+        keys.push(key);
+    }
+    let mut bloom = BloomFilter::for_items(keys.len());
+    for key in keys {
+        bloom.insert(&key);
+    }
+    Ok(Sstable {
+        path: path.to_path_buf(),
+        bloom,
+        sparse_index,
+    })
+}
+
 pub struct Lsm {
     dir: PathBuf,
     memtable: BTreeMap<String, String>,
     wal: File,
-    sstable_paths: Vec<PathBuf>, // oldest first
-    pub memtable_limit: usize,   // entries before an automatic flush
+    sstables: Vec<Sstable>,    // oldest first
+    pub memtable_limit: usize, // entries before an automatic flush
+    pub auto_compact_threshold: Option<usize>,
 }
 
 impl Lsm {
@@ -98,12 +183,18 @@ impl Lsm {
             .collect();
         sstable_paths.sort(); // filenames are zero-padded, so lexical order == creation order
 
+        let sstables = sstable_paths
+            .iter()
+            .map(|path| build_sstable_metadata(path))
+            .collect::<io::Result<Vec<_>>>()?;
+
         Ok(Lsm {
             dir,
             memtable,
             wal,
-            sstable_paths,
+            sstables,
             memtable_limit: 4,
+            auto_compact_threshold: None,
         })
     }
 
@@ -117,6 +208,12 @@ impl Lsm {
         self.memtable.insert(key.to_string(), value.to_string());
         if self.memtable.len() >= self.memtable_limit {
             self.flush()?;
+            if self
+                .auto_compact_threshold
+                .is_some_and(|threshold| threshold > 0 && self.sstables.len() > threshold)
+            {
+                self.compact()?;
+            }
         }
         Ok(())
     }
@@ -128,14 +225,57 @@ impl Lsm {
         if let Some(v) = self.memtable.get(key) {
             return Ok(Some(v.clone()));
         }
-        for path in self.sstable_paths.iter().rev() {
-            for (k, v) in read_all_entries(path)? {
+        self.get_from_sstables(key, true, true)
+    }
+
+    fn get_from_sstables(
+        &self,
+        key: &str,
+        use_bloom_filter: bool,
+        use_sparse_index: bool,
+    ) -> io::Result<Option<String>> {
+        for table in self.sstables.iter().rev() {
+            if use_bloom_filter && !table.bloom.contains(key) {
+                continue;
+            }
+            let mut reader = BufReader::new(File::open(&table.path)?);
+            let mut offset = 0;
+            if use_sparse_index {
+                for (indexed_key, indexed_offset) in &table.sparse_index {
+                    if indexed_key.as_str() <= key {
+                        offset = *indexed_offset;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            reader.seek(SeekFrom::Start(offset))?;
+            while let Some((k, v)) = read_entry(&mut reader)? {
                 if k == key {
                     return Ok(Some(v));
+                }
+                if k.as_str() > key {
+                    break;
                 }
             }
         }
         Ok(None)
+    }
+
+    /// Reference scan used by the benchmark to isolate filter/index gains.
+    pub fn get_linear(&self, key: &str) -> io::Result<Option<String>> {
+        if let Some(v) = self.memtable.get(key) {
+            return Ok(Some(v.clone()));
+        }
+        self.get_from_sstables(key, false, false)
+    }
+
+    /// Reference path with the sparse index but without the Bloom filter.
+    pub fn get_sparse(&self, key: &str) -> io::Result<Option<String>> {
+        if let Some(v) = self.memtable.get(key) {
+            return Ok(Some(v.clone()));
+        }
+        self.get_from_sstables(key, false, true)
     }
 
     /// Writes the memtable out as a new sorted SSTable, clears it, and
@@ -144,13 +284,13 @@ impl Lsm {
         if self.memtable.is_empty() {
             return Ok(());
         }
-        let path = self.dir.join(format!("sstable_{:05}.dat", self.sstable_paths.len()));
+        let path = self.dir.join(format!("sstable_{:05}.dat", self.sstables.len()));
         let mut w = BufWriter::new(File::create(&path)?);
         for (k, v) in &self.memtable {
             write_entry(&mut w, k, v)?;
         }
         w.flush()?;
-        self.sstable_paths.push(path);
+        self.sstables.push(build_sstable_metadata(&path)?);
         self.memtable.clear();
 
         self.wal = OpenOptions::new()
@@ -166,15 +306,15 @@ impl Lsm {
     /// for the same key, since they're merged oldest-to-newest into a
     /// map). Returns (tables_before, keys_after).
     pub fn compact(&mut self) -> io::Result<(usize, usize)> {
-        let tables_before = self.sstable_paths.len();
+        let tables_before = self.sstables.len();
         let mut merged: BTreeMap<String, String> = BTreeMap::new();
-        for path in &self.sstable_paths {
-            for (k, v) in read_all_entries(path)? {
+        for table in &self.sstables {
+            for (k, v) in read_all_entries(&table.path)? {
                 merged.insert(k, v); // newer tables are visited later, so they win
             }
         }
-        for path in &self.sstable_paths {
-            fs::remove_file(path)?;
+        for table in &self.sstables {
+            fs::remove_file(&table.path)?;
         }
         let keys_after = merged.len();
         let new_path = self.dir.join("sstable_00000.dat");
@@ -183,7 +323,7 @@ impl Lsm {
             write_entry(&mut w, k, v)?;
         }
         w.flush()?;
-        self.sstable_paths = vec![new_path];
+        self.sstables = vec![build_sstable_metadata(&new_path)?];
         Ok((tables_before, keys_after))
     }
 
@@ -191,6 +331,6 @@ impl Lsm {
         self.memtable.len()
     }
     pub fn sstable_count(&self) -> usize {
-        self.sstable_paths.len()
+        self.sstables.len()
     }
 }

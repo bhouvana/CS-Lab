@@ -8,11 +8,11 @@ UNAME_S := $(shell uname -s)
 CC := gcc
 CFLAGS := -Wall -Wextra -O2
 
-.PHONY: build test benchmark clean objdump
+.PHONY: build test benchmark strace-benchmark test-asan clean objdump
 
 ifeq ($(UNAME_S),Linux)
 
-build: demo hello_nolibc
+build: demo hello_nolibc cat_raw
 
 demo: src/main.c src/syscalls.S
 	$(CC) $(CFLAGS) src/main.c src/syscalls.S -o demo
@@ -29,22 +29,33 @@ demo_test: tests/test_syscalls.c src/syscalls.S
 demo_bench: src/bench.c src/syscalls.S
 	$(CC) $(CFLAGS) src/bench.c src/syscalls.S -o demo_bench
 
-test: demo_test
+cat_raw: src/cat.c src/syscalls.S
+	$(CC) $(CFLAGS) src/cat.c src/syscalls.S -o cat_raw
+
+test: demo_test cat_raw
 	./demo_test
+	test "$$(printf 'syscall cat\n' | ./cat_raw)" = "syscall cat"
 
 benchmark: demo_bench
 	./demo_bench
 
-# CS-LAB.md §26: objdump example -- my_write's actual machine code.
+strace-benchmark: demo_bench
+	SYSCALL_BENCH_ITERATIONS=1000 strace -c -e trace=getpid,write ./demo_bench >/dev/null
+
+test-asan: tests/test_syscalls.c src/syscalls.S
+	$(CC) $(CFLAGS) -fsanitize=address,undefined -g tests/test_syscalls.c src/syscalls.S -o demo_test_asan
+	./demo_test_asan
+
+# CS-LAB.md §26: objdump example -- the raw wrappers' actual machine code.
 objdump: demo
-	objdump -d demo -M att --disassemble=my_write --disassemble=my_exit
+	objdump -d demo -M att --disassemble=my_read --disassemble=my_write --disassemble=my_exit --disassemble=my_getpid
 
 else
 
-build test benchmark objdump:
+build test benchmark strace-benchmark test-asan objdump:
 	@echo "skip: assembly/syscall-demo is Linux x86-64 only (see README) -- detected '$(UNAME_S)'"
 
 endif
 
 clean:
-	rm -f demo demo_test demo_bench hello_nolibc
+	rm -f demo demo_test demo_bench demo_test_asan cat_raw hello_nolibc syscall_bench.tmp tests/tmp_syscall_test.txt tests/tmp_syscall_test2.txt

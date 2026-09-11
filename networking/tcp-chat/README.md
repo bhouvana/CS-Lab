@@ -65,6 +65,9 @@ client:
 
 - `include/chat.h` — shared constants.
 - `src/server.c` — the event loop.
+- `src/server_poll.c` — the same protocol implemented with `poll()`.
+- `src/server_queue.c` — a `poll()` server with non-blocking sockets and
+  bounded per-client output queues.
 - `src/client.c` — the interactive CLI (stdin + socket, multiplexed).
 - `src/bench.c` — the broadcast-latency experiment.
 - `tests/test_chat.c` — 5 integration tests, each with its own
@@ -119,6 +122,30 @@ write queues) to stay fast at thousands of connections, but for the 32
 clients this design targets, linear-but-small is a fine trade for the
 simplicity of "no threads, no queues."
 
+## Experiment implementations
+
+The three follow-up experiments are now included as small, runnable
+variants of this lab:
+
+- `make experiments` builds `poll_server` from `src/server_poll.c`.
+  It rebuilds a `struct pollfd` array on each iteration and handles
+  `POLLIN`, `POLLHUP`, and `POLLERR` without changing the wire protocol.
+- The same target builds `queue_server` from `src/server_queue.c`.
+  Client sockets are non-blocking; broadcasts append to a 64 KiB
+  per-client queue, and `POLLOUT` drains queued bytes. A client whose
+  bounded queue fills is dropped instead of blocking every other client.
+- The baseline `server` accepts `/nick <name>`. A valid name is
+  announced to peers, and later messages use `<name>: <message>` instead
+  of a numeric prefix. Names are limited to 31 bytes.
+
+Validation on 2026-09-11: editor C diagnostics reported no errors for
+the baseline server, both variants, or the integration test, and
+`git diff --check -- networking/tcp-chat` passed. The documented Linux
+commands (`make build`, `make test`, `make benchmark`, and `make
+test-asan`) could not run because WSL reported `bash: not found` in this
+environment. Therefore no new runtime or sanitizer numbers are claimed
+for these variants; the latency table above remains the previously
+recorded baseline benchmark.
 ## What I learned
 
 Building `src/bench.c` crashed the server almost immediately once
@@ -142,20 +169,10 @@ line, that the test genuinely fails without it.
 
 - 32-client cap (`MAX_CLIENTS` in `chat.h`) — a real server would grow
   its client table dynamically.
-- No authentication, no usernames beyond a numeric client ID, no
-  message history for late joiners.
+- No authentication or persistent usernames; names are in-memory only,
+  and there is no message history for late joiners.
 - `select()`, not `poll()`/`epoll()` — simpler and universally
   portable across POSIX systems, but `select()`'s O(highest fd) rebuild
   cost per iteration doesn't scale to very large client counts the way
   `epoll()` would.
 - IPv4 only.
-
-## Further experiments
-
-- Port the server to `poll()` (directive-permitted alternative) and
-  compare code complexity and CPU usage at high client counts.
-- Add non-blocking sends with a per-client output queue, then
-  benchmark broadcast latency when one slow/stalled client would
-  otherwise block the whole loop.
-- Add a simple `/nick <name>` command and track usernames instead of
-  numeric client IDs.

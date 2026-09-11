@@ -9,6 +9,7 @@ extern long add3(long a, long b, long c);
 extern long uses_callee_saved(long a);
 extern long check_rbx_preserved(void);
 extern long sum_three_locals(long a, long b, long c);
+extern double add_fp2(double a, double b);
 
 int main(void) {
     printf("add2(3, 4)              = %ld\n", add2(3, 4));
@@ -17,5 +18,6 @@ int main(void) {
     printf("check_rbx_preserved()    = %ld (1 = RBX survived the call, as the ABI requires)\n",
            check_rbx_preserved());
     printf("sum_three_locals(1,2,3)  = %ld\n", sum_three_locals(1, 2, 3));
+    printf("add_fp2(1.5, 2.25)      = %.2f\n", add_fp2(1.5, 2.25));
     return 0;
 }

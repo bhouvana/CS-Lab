@@ -25,34 +25,39 @@ just those three calls plus careful handling of what happens when they
 don't go as planned: a command that doesn't exist, a directory that
 isn't there, a signal arriving mid-prompt.
 
-## Concept
+## Experiments
+
+The three follow-up experiments are implemented in the shell and its
+existing benchmark harness:
+
+1. **Pipelines.** `shell_exec_line()` splits top-level `|` operators,
+  forks one process per stage, connects adjacent pipes, and reports the
+  final stage's status. `make benchmark` compares 200 `true` commands
+  with 200 `true | true` pipelines.
+2. **Process creation versus one syscall.** The benchmark compares its
+  `true` command baseline with a Linux x86-64 raw `getpid` syscall in
+  `src/bench.c`. This isolates the cost of the shell's fork/exec/wait
+  round trip from a single kernel transition, using the same raw syscall
+  model as `assembly/syscall-demo` without changing that unrelated lab.
+3. **Status operators.** `$?` expands to the previous command's status;
+  `&&` runs its right side only after success and `||` runs it only after
+  failure. The integration test covers both short-circuit paths and the
+  expanded status value.
+
+## Results
+
+The source and editor diagnostics validate cleanly, but executable
+measurements are blocked in this Windows workspace. The available GCC is
+MinGW and the direct shell build fails at the first POSIX-only include:
 
 ```text
-read a line
-      |
-      v
-  tokenize            split on whitespace; "quoted spaces" stay one token
-      |
-      v
-  builtin?  --yes-->  cd / exit / pwd, handled in-process
-      |no
-      v
-   fork()             one new process, a copy of the shell
-      |
-      v
-  execvp() in child    replace the child's image with the requested program
-      |
-      v
-  waitpid() in parent  block until the child exits (or is killed by a signal)
-      |
-      v
-  exit status          becomes $?-equivalent for the next iteration
+src/shell.c:12:10: fatal error: sys/wait.h: No such file or directory
 ```
 
-## How it works
-
-- **Tokenizing** (`shell_tokenize`) splits on runs of whitespace and
-  treats a `"double"` or `'single'` quoted substring as one token even
+Therefore `build`, `test`, `benchmark`, and `test-asan` have no runnable
+result here. The Makefile already documents the intended Linux/POSIX
+environment and the sanitizer target should be run there; no timing
+numbers are recorded as if they were measured on this host.
   if it contains spaces — `echo "hello world"` is 2 tokens, not 3. An
   unterminated quote is rejected (`-1`), not silently truncated.
 - **Builtins run in the shell's own process** because they change the
@@ -84,18 +89,19 @@ read a line
 
 ## Implementation
 
-- `include/shell.h` — the 3-function public API.
+- `include/shell.h` — the public shell API.
 - `src/shell.c` — tokenizing, the 3 builtins, `fork`/`exec`/`wait`, the
   read-eval loop.
 - `src/main.c` — the entry point (12 lines).
-- `src/bench.c` — the command-throughput experiment.
-- `tests/test_shell.c` — 15 tests: 9 direct unit tests against
+- `src/bench.c` — the command-throughput and follow-up experiments.
+- `tests/test_shell.c` — 17 tests: 9 direct unit tests against
   `shell_tokenize()` (normal cases, quoting, edge cases, 2 invalid
-  unterminated-quote cases, an over-`max_args` case), and 6 integration
+  unterminated-quote cases, an over-`max_args` case), and 8 integration
   tests that `fork()`+`exec()` the real `./shell` binary and drive it
   over a pipe (same pattern as `networking/tcp-chat`'s tests) —
   including a named regression test that sends the shell a real
-  `SIGINT` and confirms it's still alive and working afterward.
+  `SIGINT` and confirms it's still alive and working afterward, plus
+  pipeline and `&&`/`||`/`$?` integration cases.
 
 ## Example
 
@@ -116,32 +122,37 @@ $ exit 3
 
 ## Experiments
 
-**How many trivial commands per second can the shell's own
-read → tokenize → fork → exec → wait loop push through?** `src/bench.c`
-drives a fresh `./shell` process with a pipe full of `true\n` commands
-(1 fork+exec+wait each) and times the whole run with
-`clock_gettime(CLOCK_MONOTONIC)`.
+The three follow-up experiments are implemented in the shell and its
+existing benchmark harness:
 
-Real output from `make benchmark`:
-
-```text
-commands    elapsed(ms)   commands/sec
-100         83.82         1193
-500         367.94        1359
-2000        1290.81       1549
-```
+1. **Pipelines.** `shell_exec_line()` splits top-level `|` operators,
+  forks one process per stage, connects adjacent pipes, and reports the
+  final stage's status. `make benchmark` compares 200 `true` commands
+  with 200 `true | true` pipelines.
+2. **Process creation versus one syscall.** The benchmark compares its
+  `true` command baseline with a Linux x86-64 raw `getpid` syscall in
+  `src/bench.c`. This isolates the cost of the shell's fork/exec/wait
+  round trip from a single kernel transition, using the same raw syscall
+  model as `assembly/syscall-demo` without changing that unrelated lab.
+3. **Status operators.** `$?` expands to the previous command's status;
+  `&&` runs its right side only after success and `||` runs it only after
+  failure. The integration test covers both short-circuit paths and the
+  expanded status value.
 
 ## Results
 
-Throughput holds in the same ballpark (~1200-1550 commands/sec)
-regardless of scale, and creeps up slightly at higher counts — the
-per-process `fork()`+`execvp()` cost dominates and is roughly constant,
-while the fixed one-time cost of starting the benchmark's own outer
-shell process amortizes away over more commands. This is the concrete
-cost of "just running a command": at ~1ms per trivial command, a shell
-script invoking hundreds of small subprocesses is a real, measurable
-tax — the reason shells have builtins at all (`cd`, `exit`, `pwd`
-here) instead of shelling out to `/bin/pwd` for everything.
+The source and editor diagnostics validate cleanly, but executable
+measurements are blocked in this Windows workspace. The available GCC is
+MinGW and the direct shell build fails at the first POSIX-only include:
+
+```text
+src/shell.c:12:10: fatal error: sys/wait.h: No such file or directory
+```
+
+Therefore `build`, `test`, `benchmark`, and `test-asan` have no runnable
+result here. The Makefile already documents the intended Linux/POSIX
+environment and the sanitizer target should be run there; no timing
+numbers are recorded as if they were measured on this host.
 
 ## What I learned
 
@@ -157,10 +168,10 @@ tcp-chat's benchmark already uses — fixed it.
 
 ## Limitations
 
-- No pipes (`|`), redirection (`>`, `<`), or background jobs (`&`) —
-  see "What this intentionally does NOT do" below.
-- No shell scripting: no variables, no `if`/`for`, no `$?`. `exit` takes
-  a literal numeric argument, not an expression.
+- No redirection (`>`, `<`) or background jobs (`&`) — see "What this
+  intentionally does NOT do" below.
+- No shell scripting: no variables, no `if`/`for`. `exit` takes a
+  literal numeric argument, not an expression.
 - No job control (`fg`/`bg`/`jobs`) — a single foreground child at a
   time is the whole model.
 - `SIGINT` is the only signal handled specially. `SIGTSTP` (Ctrl-Z) and
@@ -175,23 +186,12 @@ tcp-chat's benchmark already uses — fixed it.
 ## What this intentionally does NOT do
 
 This is a shell lab, not an attempt to reimplement Bash. On purpose,
-it never grows: pipelines, I/O redirection, globbing/wildcard
+it never grows: I/O redirection, globbing/wildcard
 expansion, environment-variable expansion (`$HOME` typed literally
 does nothing special), command history, tab completion, or a
 configuration file. Each of those is a real, separate feature with its
-own design space (a pipeline alone needs a second process, two more
-pipes, and careful `waitpid` ordering for every stage) — bolting them
-on here would trade "a shell small enough to read start to finish" for
+own design space (redirection alone needs descriptor parsing and careful
+close ordering) — bolting them on here would trade "a shell small enough
+to read start to finish" for
 "a worse Bash," which is exactly the tradeoff CS-LAB.md's scope rules
 warn against.
-
-## Further experiments
-
-- Add pipelines (`cmd1 | cmd2`) and measure the added `fork`/`pipe`
-  overhead per stage against this lab's baseline.
-- Compare this shell's fork+exec+wait cost against
-  `assembly/syscall-demo`'s raw single-syscall cost, to see how much of
-  a shell's per-command overhead is the syscalls themselves vs. process
-  creation/teardown.
-- Add `$?` and simple `&&`/`||` chaining, and measure how much
-  tokenizing complexity that adds relative to the throughput gained.
