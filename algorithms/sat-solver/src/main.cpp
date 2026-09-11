@@ -1,20 +1,36 @@
-// CLI: sat <file.cnf> [--heuristic first|most]
-#include <cstring>
+// CLI: sat <file.cnf> [--heuristic first|most|vsids] [--propagation naive|watched]
 #include <iostream>
+#include <string>
 
 #include "sat.hpp"
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::cerr << "usage: " << argv[0] << " <file.cnf> [--heuristic first|most]\n";
+        std::cerr << "usage: " << argv[0]
+                   << " <file.cnf> [--heuristic first|most|vsids] [--propagation naive|watched]\n";
         return 2;
     }
 
     Heuristic heuristic = Heuristic::FirstUnassigned;
-    if (argc >= 4 && std::strcmp(argv[2], "--heuristic") == 0) {
-        if (std::strcmp(argv[3], "most") == 0) heuristic = Heuristic::MostOccurrences;
-        else if (std::strcmp(argv[3], "first") != 0) {
-            std::cerr << "unknown heuristic '" << argv[3] << "', expected first|most\n";
+    Propagation propagation = Propagation::Naive;
+    for (int i = 2; i + 1 < argc; i += 2) {
+        std::string flag = argv[i];
+        std::string value = argv[i + 1];
+        if (flag == "--heuristic") {
+            if (value == "most") heuristic = Heuristic::MostOccurrences;
+            else if (value == "vsids") heuristic = Heuristic::Vsids;
+            else if (value != "first") {
+                std::cerr << "unknown heuristic '" << value << "', expected first|most|vsids\n";
+                return 2;
+            }
+        } else if (flag == "--propagation") {
+            if (value == "watched") propagation = Propagation::WatchedLiterals;
+            else if (value != "naive") {
+                std::cerr << "unknown propagation '" << value << "', expected naive|watched\n";
+                return 2;
+            }
+        } else {
+            std::cerr << "unknown flag '" << flag << "'\n";
             return 2;
         }
     }
@@ -27,7 +43,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    Solver solver(formula.num_vars, formula.clauses, heuristic);
+    Solver solver(formula.num_vars, formula.clauses, heuristic, propagation);
     bool sat = solver.solve();
 
     if (sat) {

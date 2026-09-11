@@ -73,5 +73,83 @@ int main() {
                    << std::setw(16) << (double)total_backtracks / samples_per_ratio
                    << std::setprecision(4) << (total_ms / samples_per_ratio) << std::setprecision(2) << "\n";
     }
+
+    // --- Watched literals: same decisions/backtracks, faster wall-clock? ---
+    std::cout << "\nBenchmark: naive vs. watched-literals propagation, at the hardest ratio (4.27)\n";
+    std::cout << "(20 variables, same instances fed to both -- decisions/backtracks should match exactly)\n\n";
+    std::cout << std::left << std::setw(10) << "clauses" << std::setw(16) << "naive ms" << std::setw(20)
+               << "watched ms" << std::setw(12) << "speedup" << std::setw(24) << "decisions match?" << "\n";
+    {
+        std::mt19937 rng2(42);
+        int num_clauses = (int)(4.27 * 20);
+        double naive_total = 0.0, watched_total = 0.0;
+        bool all_match = true;
+        for (int s = 0; s < samples_per_ratio; s++) {
+            auto clauses = random_3sat(20, num_clauses, rng2);
+            Solver naive(20, clauses, Heuristic::FirstUnassigned, Propagation::Naive);
+            Solver watched(20, clauses, Heuristic::FirstUnassigned, Propagation::WatchedLiterals);
+            bool sn = naive.solve(), sw = watched.solve();
+            naive_total += naive.stats().runtime_ms;
+            watched_total += watched.stats().runtime_ms;
+            if (sn != sw || naive.stats().decisions != watched.stats().decisions ||
+                naive.stats().backtracks != watched.stats().backtracks)
+                all_match = false;
+        }
+        double speedup = watched_total > 0.0 ? naive_total / watched_total : 0.0;
+        std::cout << std::left << std::setw(10) << num_clauses << std::setw(16) << std::setprecision(4)
+                   << naive_total << std::setw(20) << watched_total << std::setw(12) << std::setprecision(2)
+                   << speedup << std::setw(24) << (all_match ? "yes, all 20" : "MISMATCH") << "\n";
+    }
+
+    // --- VSIDS vs most-occurrences, at the hardest ratio ---
+    std::cout << "\nBenchmark: VSIDS vs. most-occurrences heuristic, at the hardest ratio (4.27)\n";
+    std::cout << "(same instances fed to both)\n\n";
+    std::cout << std::left << std::setw(10) << "clauses" << std::setw(20) << "most-occ decisions" << std::setw(20)
+               << "vsids decisions" << std::setw(20) << "most-occ backtracks" << "vsids backtracks" << "\n";
+    {
+        std::mt19937 rng3(42);
+        int num_clauses = (int)(4.27 * 20);
+        long long mo_dec = 0, mo_bt = 0, vs_dec = 0, vs_bt = 0;
+        for (int s = 0; s < samples_per_ratio; s++) {
+            auto clauses = random_3sat(20, num_clauses, rng3);
+            Solver mo(20, clauses, Heuristic::MostOccurrences);
+            Solver vs(20, clauses, Heuristic::Vsids);
+            mo.solve();
+            vs.solve();
+            mo_dec += mo.stats().decisions;
+            mo_bt += mo.stats().backtracks;
+            vs_dec += vs.stats().decisions;
+            vs_bt += vs.stats().backtracks;
+        }
+        std::cout << std::left << std::setw(10) << num_clauses << std::setw(20)
+                   << (double)mo_dec / samples_per_ratio << std::setw(20) << (double)vs_dec / samples_per_ratio
+                   << std::setw(20) << (double)mo_bt / samples_per_ratio << (double)vs_bt / samples_per_ratio
+                   << "\n";
+    }
+
+    // --- Does backtrack count at the hardest ratio scale with problem size? ---
+    std::cout << "\nBenchmark: backtrack count vs. num_vars, at the hardest ratio (4.27)\n\n";
+    std::cout << std::left << std::setw(10) << "num_vars" << std::setw(10) << "clauses" << std::setw(16)
+               << "avg decisions" << std::setw(16) << "avg backtracks" << "avg ms" << "\n";
+    {
+        std::mt19937 rng4(42);
+        for (int nv : {10, 14, 18, 22, 26}) {
+            int num_clauses = (int)(4.27 * nv);
+            long long total_decisions = 0, total_backtracks = 0;
+            double total_ms = 0.0;
+            const int samples = 10; // fewer than the ratio sweep -- larger nv gets noticeably slower
+            for (int s = 0; s < samples; s++) {
+                auto clauses = random_3sat(nv, num_clauses, rng4);
+                Solver solver(nv, clauses);
+                solver.solve();
+                total_decisions += solver.stats().decisions;
+                total_backtracks += solver.stats().backtracks;
+                total_ms += solver.stats().runtime_ms;
+            }
+            std::cout << std::left << std::setw(10) << nv << std::setw(10) << num_clauses << std::setw(16)
+                       << (double)total_decisions / samples << std::setw(16) << (double)total_backtracks / samples
+                       << std::setprecision(4) << (total_ms / samples) << std::setprecision(2) << "\n";
+        }
+    }
     return 0;
 }
