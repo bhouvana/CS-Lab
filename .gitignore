@@ -59,6 +59,10 @@ target/
 /networking/tcp-chat/chat_test
 /networking/tcp-chat/chat_test_asan
 /networking/tcp-chat/chat_bench
+/os/shell/shell
+/os/shell/shell_test
+/os/shell/shell_test_asan
+/os/shell/shell_bench
 /os/allocator/allocator_demo
 /os/allocator/allocator_test
 /os/allocator/allocator_test_asan
