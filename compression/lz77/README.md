@@ -66,7 +66,7 @@ back 8 bytes for length 7 plus a final literal `A`.
 - `include/lz77.hpp` / `src/lz77.cpp` — compress, decompress, and
   binary (de)serialization.
 - `src/main.cpp` — CLI.
-- `src/bench.cpp` — both experiments below.
+- `src/bench.cpp` — the four experiments below.
 - `tests/test_lz77.cpp` — 9 tests: the directive's own example,
   English text, empty/single-byte/two-byte edges, a long overlapping
   run, all 256 byte values, a corrupt token stream, and window-size
@@ -114,6 +114,38 @@ window        tokens    compressed
 4096          55        220
 ```
 
+**3. Variable-width token cost.** An ideal bit-packed format would use
+9 bits for a literal token (flag plus byte) and 33 bits for a match
+token (flag, offset, length, and trailing byte). This is a size model,
+not a replacement on-disk format.
+
+```text
+dataset                     original  tokens    fixed bytes packed bytes ratio
+repetitive (A's + B's)      2000      11        44          43           2.1%
+English text                1201      358       1432        1411       117.5%
+this lab's own source code  3268      543       2172        2162        66.2%
+```
+
+**4. Naive matching versus a bounded hash chain.** The benchmark-only
+hash-chain matcher examines at most 64 same-three-byte candidates, so
+it is a speed experiment rather than a change to the production API.
+Both matchers process the same inputs and repeat until at least 50 ms
+has elapsed per row.
+
+```text
+dataset                         average       tokens/sec
+naive, 16,000-byte repetitive  2.289 ms/run       28,830
+hash, 16,000-byte repetitive    0.066 ms/run    1,007,279
+naive, 32,000-byte mixed        3.675 ms/run      103,675
+hash, 32,000-byte mixed         0.261 ms/run    1,466,466
+```
+
+**Chaining LZ77 output through Huffman.** On the 1,257-byte English
+example, LZ77 produces 1,460 bytes and Huffman reduces that token stream
+to 1,270 bytes. The chain is still 1.03x the original because the input
+is too small for both fixed token and Huffman-header overheads to be
+amortized.
+
 ## Results
 
 **Repetitive data compresses to 2.2% of its original size** — 2000
@@ -134,6 +166,15 @@ all find it identically (55 tokens, no further improvement from 512 to
 4096). The window only needs to be *big enough*; past that, making it
 bigger buys nothing for this data.
 
+The ideal variable-width model barely helps this deliberately simple
+format: fixed fields are already close to their minimum for match
+tokens, and the flag overhead leaves English at 117.5% of its input.
+The hash-chain prototype is about 35x faster on the repetitive input
+and 14x faster on the mixed input, showing why production LZ parsers
+index candidate matches instead of scanning every byte in the window.
+The Huffman chain improves the LZ77 output but does not yet beat the
+original English file at this small scale.
+
 ## What I learned
 
 My first version of experiment 2 reused experiment 1's repetitive test
@@ -152,16 +193,9 @@ actually observe the effect the experiment claimed to measure.
 - Naive O(window x lookahead) match search per position (no hash
   chains or suffix structures) — fine at this lab's scale, far too
   slow for large files.
+- The hash-chain implementation exists only in `src/bench.cpp` for a
+  controlled speed comparison; the production compressor remains the
+  simple naive implementation.
 - `offset`/`length` fit in 16/8 bits, capping window size at 65535 and
   match length at 255.
 
-## Further experiments
-
-- Chain this lab's output through `compression/huffman` on the
-  serialized token stream and measure whether that recovers real
-  compression on the English-text case that expanded here.
-- Replace the fixed 4-byte token with a 1-bit flag + variable encoding
-  (literal: 1 bit + 8 bits; match: 1 bit + offset + length) and
-  re-measure the English-text ratio.
-- Add hash-chain-based match finding and measure the compression-speed
-  improvement on a multi-megabyte file.
