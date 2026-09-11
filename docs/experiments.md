@@ -61,10 +61,10 @@ data not?
 
 ```text
 dataset        original     compressed      ratio encode(ms) decode(ms)
-english            1257            959     76.29%      0.000      0.000
-repetitive         6400           1068     16.69%      0.000      0.000
-source_code        1450           1124     77.52%      0.000      0.000
-random             6400           6665    104.14%      0.000      0.000
+english            1257            959     76.29%      0.016      0.018
+repetitive         6400           1068     16.69%      0.022      0.011
+source_code        1450           1124     77.52%      0.018      0.020
+random             6400           6665    104.14%      0.215      0.097
 ```
 
 Repetitive data compresses best (one symbol dominates the frequency
@@ -74,6 +74,12 @@ stay close to 8 bits wide and the format's fixed 268-byte header adds
 pure overhead. English text and source code land around 76-78%, with
 the fixed header cost weighing more heavily on these small (~1-1.5 KB)
 sample files than it would on a larger corpus.
+
+(Updated during the CS-Lab Hardened pass: the original numbers here were
+all `0.000`, a real bug -- `clock()`'s coarse resolution on native
+Windows/MinGW, not an artifact of a fast operation. Fixed by batching
+each measurement until 50ms elapse, same pattern already used in
+sha256/bytecode-vm/gc's benchmarks; see `docs/regressions.md` #3.)
 
 ## Tiny Language / AtlasLang (`compilers/tiny-language`)
 
