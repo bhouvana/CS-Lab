@@ -52,8 +52,6 @@ is [docs/philosophy.md](docs/philosophy.md).
 - [Getting started](#getting-started)
 - [Repository layout](#repository-layout)
 - [Documentation index](#documentation-index)
-- [Scope and what this deliberately is not](#scope-and-what-this-deliberately-is-not)
-- [Relationship to Aegis-X86](#relationship-to-aegis-x86)
 - [License](#license)
 
 ---
@@ -329,34 +327,6 @@ build/usage instructions, failure behavior, limitations, and — explicitly —
 what it intentionally does *not* do.
 
 ---
-
-## Scope and what this deliberately is not
-
-This is a laboratory, not a startup, and not an attempt at production
-infrastructure. Explicitly out of scope, on purpose: a web UI, a database
-beyond the LSM lab itself, authentication, cloud deployment, microservices,
-a plugin system, or any dependency added to look sophisticated rather than
-to solve a real problem. Terminal in, terminal out.
-
-The implementations are educational: toy models and research prototypes,
-not audited, production-grade, or cryptographically certified software —
-the SHA-256 and constant-time-compare labs say so explicitly in their own
-READMEs, and `docs/production-readiness.md` defines exactly what
-"production-ready" is and isn't being claimed here. "Hardened" in this
-repo's docs means *engineered to a high standard appropriate to its
-educational scope* — deterministic, defensively tested, memory-safety
-verified where a sanitizer applies, honestly documented about its limits —
-not *a drop-in replacement for mature industrial software*.
-
-## Relationship to Aegis-X86
-
-[Aegis-X86](https://github.com/bhouvana/AEGIS-X86-Processor) (a separate
-project) is the deep processor/microarchitecture laboratory: ISA design,
-out-of-order execution, speculation, a real FPGA and open-PDK silicon flow.
-CS-Lab is the broader map of CS fundamentals across twelve domains; the two
-complement rather than duplicate each other — CS-Lab's `architecture/`
-labs are a small, single-file-readable introduction to ideas Aegis-X86
-implements at full scale in synthesizable hardware.
 
 ## License
 
