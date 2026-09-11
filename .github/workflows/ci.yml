@@ -1,0 +1,44 @@
+name: CI
+
+# One job on ubuntu-latest, not a matrix. GitHub's Ubuntu runner already
+# ships gcc/g++/make/python3/cargo, so it exercises every one of the 20
+# labs in a single place -- including the 4 that are Linux-only
+# (networking/tcp-chat, assembly/*) and never run on this repo's
+# Windows/MinGW dev machine. See docs/reproducibility.md for what "CI
+# passing" does and doesn't establish about the Windows/MinGW path.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          gcc --version | head -1
+          g++ --version | head -1
+          rustc --version
+          cargo --version
+          python3 --version
+
+      - name: make build
+        run: make build
+
+      - name: make test
+        run: make test
+
+      - name: make format (cargo fmt --check; clang-format is report-only)
+        run: make format
+
+      - name: make lint (cargo clippy -D warnings)
+        run: make lint
+
+      - name: make sanitize (ASan + UBSan, priority labs)
+        run: make sanitize
+
+      - name: make clean
+        run: make clean
